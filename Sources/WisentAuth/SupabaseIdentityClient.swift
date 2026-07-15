@@ -81,6 +81,147 @@ actor SupabaseIdentityClient {
         return id
     }
 
+    func pendingInvitations(session identity: WisentSession) async throws -> [WisentUserInvite] {
+        let data = try await rpc("list_invites_for_user", body: [:], session: identity)
+        return try Self.decode([WisentUserInvite].self, from: data)
+    }
+
+    func acceptInvitation(_ invitation: WisentUserInvite, session identity: WisentSession) async throws -> String {
+        let data = try await rpc(
+            "accept_org_invite",
+            body: ["invite_token": invitation.token],
+            session: identity
+        )
+        guard let organizationID = try JSONSerialization.jsonObject(
+            with: data,
+            options: [.fragmentsAllowed]
+        ) as? String, !organizationID.isEmpty else {
+            throw WisentAuthError.noOrganization
+        }
+        return organizationID
+    }
+
+    func declineInvitation(_ invitation: WisentUserInvite, session identity: WisentSession) async throws {
+        _ = try await rpc(
+            "decline_org_invite",
+            body: ["invite_id": invitation.id],
+            session: identity
+        )
+    }
+
+    func organizationMembers(
+        organizationID: String,
+        session identity: WisentSession
+    ) async throws -> [WisentOrganizationMember] {
+        let data = try await rpc(
+            "list_org_members_for_org",
+            body: ["target_org_id": organizationID],
+            session: identity
+        )
+        return try Self.decode([WisentOrganizationMember].self, from: data)
+    }
+
+    func organizationInvitations(
+        organizationID: String,
+        session identity: WisentSession
+    ) async throws -> [WisentOrganizationInvite] {
+        let data = try await rpc(
+            "list_org_invites_for_org",
+            body: ["target_org_id": organizationID],
+            session: identity
+        )
+        return try Self.decode([WisentOrganizationInvite].self, from: data)
+    }
+
+    func inviteMember(
+        email: String,
+        role: String,
+        organizationID: String,
+        session identity: WisentSession
+    ) async throws {
+        _ = try await rpc(
+            "invite_org_member_for_org",
+            body: [
+                "target_org_id": organizationID,
+                "invitee_email": email,
+                "invitee_role": role,
+            ],
+            session: identity
+        )
+    }
+
+    func cancelInvitation(
+        id: String,
+        organizationID: String,
+        session identity: WisentSession
+    ) async throws {
+        _ = try await rpc(
+            "cancel_org_invite_for_org",
+            body: ["target_org_id": organizationID, "invite_id": id],
+            session: identity
+        )
+    }
+
+    func removeMember(
+        userID: String,
+        organizationID: String,
+        session identity: WisentSession
+    ) async throws {
+        _ = try await rpc(
+            "remove_org_member_from_org",
+            body: ["target_org_id": organizationID, "member_user_id": userID],
+            session: identity
+        )
+    }
+
+    func updateMemberRole(
+        userID: String,
+        role: String,
+        organizationID: String,
+        session identity: WisentSession
+    ) async throws {
+        _ = try await rpc(
+            "update_org_member_role_for_org",
+            body: [
+                "target_org_id": organizationID,
+                "member_user_id": userID,
+                "new_role": role,
+            ],
+            session: identity
+        )
+    }
+
+    private func rpc(
+        _ name: String,
+        body: [String: Any],
+        session identity: WisentSession
+    ) async throws -> Data {
+        try await rest(
+            method: "POST",
+            path: "/rest/v1/rpc/\(name)",
+            body: body,
+            accessToken: identity.accessToken
+        )
+    }
+
+    private static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let plain = ISO8601DateFormatter()
+            plain.formatOptions = [.withInternetDateTime]
+            guard let date = fractional.date(from: raw) ?? plain.date(from: raw) else {
+                throw DecodingError.dataCorrupted(
+                    .init(codingPath: decoder.codingPath, debugDescription: "Invalid date: \(raw)")
+                )
+            }
+            return date
+        }
+        return try decoder.decode(type, from: data)
+    }
+
     private var normalizedBaseURL: String {
         var value = configuration.supabaseURL
         while value.hasSuffix("/") { value.removeLast() }

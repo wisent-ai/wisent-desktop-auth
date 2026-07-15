@@ -13,6 +13,7 @@ public extension EnvironmentValues {
 
 public struct WisentAuthGate<Content: View>: View {
     @ObservedObject private var store: WisentAuthStore
+    @State private var isOrganizationManagerPresented = false
     private let content: () -> Content
 
     public init(store: WisentAuthStore, @ViewBuilder content: @escaping () -> Content) {
@@ -27,6 +28,8 @@ public struct WisentAuthGate<Content: View>: View {
                 loadingView
             case .signedOut, .waitingForCode:
                 WisentSignInView(store: store)
+            case .reviewingInvitations:
+                OrganizationInvitationReviewView(store: store)
             case .choosingOrganization:
                 OrganizationPickerView(store: store)
             case .ready:
@@ -40,6 +43,9 @@ public struct WisentAuthGate<Content: View>: View {
             }
         }
         .task { await store.start() }
+        .sheet(isPresented: $isOrganizationManagerPresented) {
+            OrganizationManagementView(store: store)
+        }
     }
 
     private var loadingView: some View {
@@ -59,6 +65,13 @@ public struct WisentAuthGate<Content: View>: View {
                 if let organization = store.selectedOrganization {
                     Section("Organization") {
                         Label(organization.name, systemImage: "building.2.fill")
+                        Text(organization.role.capitalized)
+                        Button {
+                            isOrganizationManagerPresented = true
+                        } label: {
+                            Label("Manage organization…", systemImage: "person.3")
+                        }
+                        .accessibilityIdentifier("wisent.auth.manage-organization")
                     }
                 }
                 if store.organizations.count > 1 {
@@ -227,5 +240,242 @@ private struct OrganizationPickerView: View {
         .padding(40)
         .frame(minWidth: 560, minHeight: 420)
         .accessibilityIdentifier("wisent.auth.organization-picker")
+    }
+}
+
+private struct OrganizationInvitationReviewView: View {
+    @ObservedObject var store: WisentAuthStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Label("Organization invitations", systemImage: "envelope.badge")
+                .font(.title2.bold())
+            Text("Review invitations before continuing to your Wisent workspace.")
+                .foregroundStyle(.secondary)
+
+            ForEach(store.pendingInvitations) { invitation in
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(invitation.organizationName)
+                                .font(.headline)
+                            Text("Role: \(invitation.role.capitalized)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if let expiresAt = invitation.expiresAt {
+                            Text("Expires \(expiresAt.formatted(date: .abbreviated, time: .omitted))")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    HStack {
+                        Spacer()
+                        Button("Decline", role: .destructive) {
+                            Task { await store.declineInvitation(invitation) }
+                        }
+                        Button("Accept") {
+                            Task { await store.acceptInvitation(invitation) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(16)
+                .background(.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityIdentifier("wisent.auth.invitation.\(invitation.id)")
+            }
+
+            if store.isBusy {
+                ProgressView().controlSize(.small)
+            }
+            if let error = store.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("wisent.auth.invitation-error")
+            }
+
+            HStack {
+                Text(store.session?.email ?? "")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Sign out") { Task { await store.signOut() } }
+            }
+        }
+        .padding(40)
+        .frame(minWidth: 580, minHeight: 420)
+        .disabled(store.isBusy)
+        .accessibilityIdentifier("wisent.auth.invitation-review")
+    }
+}
+
+private struct OrganizationManagementView: View {
+    @ObservedObject var store: WisentAuthStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var memberPendingRemoval: WisentOrganizationMember?
+
+    private let roles = ["owner", "admin", "member"]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(store.selectedOrganization?.name ?? "Organization")
+                        .font(.title2.bold())
+                    Text("Team and access")
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if store.isOrganizationBusy {
+                    ProgressView().controlSize(.small)
+                }
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+            }
+            .padding(20)
+
+            Divider()
+
+            if let organization = store.selectedOrganization, organization.canManageMembers {
+                GroupBox("Invite a teammate") {
+                    HStack(spacing: 10) {
+                        TextField("teammate@company.com", text: $store.inviteEmail)
+                            .textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier("wisent.auth.invite-email")
+                        Picker("Role", selection: $store.inviteRole) {
+                            ForEach(availableRoles, id: \.self) { role in
+                                Text(role.capitalized).tag(role)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 120)
+                        Button("Send invite") {
+                            Task { await store.sendOrganizationInvitation() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("wisent.auth.send-invite")
+                    }
+                    .padding(.top, 4)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+            }
+
+            if let error = store.organizationError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 8)
+                    .accessibilityIdentifier("wisent.auth.organization-error")
+            }
+
+            List {
+                Section("Members") {
+                    ForEach(store.organizationMembers) { member in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(member.email)
+                                if member.userID == store.session?.userID {
+                                    Text("You")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            Text(member.role.capitalized)
+                                .font(.caption.weight(.medium))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(.secondary.opacity(0.12), in: Capsule())
+                            if canEdit(member) {
+                                Menu {
+                                    ForEach(availableRoles, id: \.self) { role in
+                                        Button(role.capitalized) {
+                                            Task {
+                                                await store.updateOrganizationMemberRole(member, role: role)
+                                            }
+                                        }
+                                        .disabled(role == member.role)
+                                    }
+                                    Divider()
+                                    Button("Remove member…", role: .destructive) {
+                                        memberPendingRemoval = member
+                                    }
+                                } label: {
+                                    Image(systemName: "ellipsis.circle")
+                                }
+                                .menuStyle(.borderlessButton)
+                            }
+                        }
+                        .accessibilityIdentifier("wisent.auth.member.\(member.userID)")
+                    }
+                }
+
+                if store.selectedOrganization?.canManageMembers == true,
+                   !store.organizationInvitations.isEmpty {
+                    Section("Pending invitations") {
+                        ForEach(store.organizationInvitations) { invitation in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(invitation.email)
+                                    Text(invitation.role.capitalized)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if let expiresAt = invitation.expiresAt {
+                                    Text(expiresAt.formatted(date: .abbreviated, time: .omitted))
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
+                                Button("Cancel", role: .destructive) {
+                                    Task { await store.cancelOrganizationInvitation(invitation) }
+                                }
+                            }
+                            .accessibilityIdentifier("wisent.auth.pending-invitation.\(invitation.id)")
+                        }
+                    }
+                }
+            }
+            .overlay {
+                if store.isOrganizationBusy && store.organizationMembers.isEmpty {
+                    ProgressView("Loading team…")
+                }
+            }
+        }
+        .frame(minWidth: 720, minHeight: 560)
+        .disabled(store.isOrganizationBusy)
+        .task { await store.loadOrganizationManagement() }
+        .alert(
+            "Remove member?",
+            isPresented: Binding(
+                get: { memberPendingRemoval != nil },
+                set: { if !$0 { memberPendingRemoval = nil } }
+            ),
+            presenting: memberPendingRemoval
+        ) { member in
+            Button("Remove", role: .destructive) {
+                Task { await store.removeOrganizationMember(member) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { member in
+            Text("\(member.email) will lose access to this organization.")
+        }
+        .accessibilityIdentifier("wisent.auth.organization-management")
+    }
+
+    private var availableRoles: [String] {
+        store.selectedOrganization?.role == "owner" ? roles : ["admin", "member"]
+    }
+
+    private func canEdit(_ member: WisentOrganizationMember) -> Bool {
+        guard member.userID != store.session?.userID,
+              let organization = store.selectedOrganization else { return false }
+        if organization.role == "owner" { return true }
+        return organization.role == "admin" && member.role != "owner"
     }
 }

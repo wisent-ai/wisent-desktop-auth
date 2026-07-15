@@ -8,6 +8,7 @@ public enum WisentAuthStatus: Equatable {
     case signedOut
     case waitingForCode
     case resolvingOrganization
+    case reviewingInvitations
     case choosingOrganization
     case ready
 }
@@ -22,6 +23,13 @@ public final class WisentAuthStore: ObservableObject {
     @Published public var code = ""
     @Published public private(set) var isBusy = false
     @Published public private(set) var errorMessage: String?
+    @Published public private(set) var pendingInvitations: [WisentUserInvite] = []
+    @Published public private(set) var organizationMembers: [WisentOrganizationMember] = []
+    @Published public private(set) var organizationInvitations: [WisentOrganizationInvite] = []
+    @Published public var inviteEmail = ""
+    @Published public var inviteRole = "member"
+    @Published public private(set) var isOrganizationBusy = false
+    @Published public private(set) var organizationError: String?
 
     public let productName: String
     public var oauthEnabled: Bool { configuration.oauthEnabled }
@@ -147,6 +155,9 @@ public final class WisentAuthStore: ObservableObject {
     public func selectOrganization(_ organization: WisentOrganization) {
         guard organizations.contains(where: { $0.id == organization.id }), let session else { return }
         selectedOrganization = organization
+        organizationMembers = []
+        organizationInvitations = []
+        organizationError = nil
         status = .ready
         do {
             try persistence.save(
@@ -154,6 +165,111 @@ public final class WisentAuthStore: ObservableObject {
             )
         } catch {
             errorMessage = Self.describe(error)
+        }
+    }
+
+    public func acceptInvitation(_ invitation: WisentUserInvite) async {
+        guard pendingInvitations.contains(where: { $0.id == invitation.id }),
+              !isBusy,
+              await ensureFreshSession(),
+              let session else { return }
+        isBusy = true
+        errorMessage = nil
+        defer { isBusy = false }
+        do {
+            let organizationID = try await client.acceptInvitation(invitation, session: session)
+            pendingInvitations.removeAll { $0.id == invitation.id }
+            if pendingInvitations.isEmpty {
+                await resolveOrganizations(preferredID: organizationID)
+            } else {
+                status = .reviewingInvitations
+            }
+        } catch {
+            errorMessage = "Invitation acceptance failed: \(Self.describe(error))"
+        }
+    }
+
+    public func declineInvitation(_ invitation: WisentUserInvite) async {
+        guard pendingInvitations.contains(where: { $0.id == invitation.id }),
+              !isBusy,
+              await ensureFreshSession(),
+              let session else { return }
+        isBusy = true
+        errorMessage = nil
+        defer { isBusy = false }
+        do {
+            try await client.declineInvitation(invitation, session: session)
+            pendingInvitations.removeAll { $0.id == invitation.id }
+            if pendingInvitations.isEmpty {
+                await resolveOrganizations(preferredID: nil)
+            } else {
+                status = .reviewingInvitations
+            }
+        } catch {
+            errorMessage = "Invitation decline failed: \(Self.describe(error))"
+        }
+    }
+
+    public func loadOrganizationManagement() async {
+        await performOrganizationOperation { _, _ in }
+    }
+
+    public func sendOrganizationInvitation() async {
+        let address = inviteEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard address.contains("@"), address.contains(".") else {
+            organizationError = "Enter a valid email address."
+            return
+        }
+        guard ["owner", "admin", "member"].contains(inviteRole) else {
+            organizationError = "Choose a valid organization role."
+            return
+        }
+        await performOrganizationOperation { session, organization in
+            try await client.inviteMember(
+                email: address,
+                role: inviteRole,
+                organizationID: organization.id,
+                session: session
+            )
+            inviteEmail = ""
+        }
+    }
+
+    public func cancelOrganizationInvitation(_ invitation: WisentOrganizationInvite) async {
+        await performOrganizationOperation { session, organization in
+            try await client.cancelInvitation(
+                id: invitation.id,
+                organizationID: organization.id,
+                session: session
+            )
+        }
+    }
+
+    public func removeOrganizationMember(_ member: WisentOrganizationMember) async {
+        await performOrganizationOperation { session, organization in
+            try await client.removeMember(
+                userID: member.userID,
+                organizationID: organization.id,
+                session: session
+            )
+        }
+    }
+
+    public func updateOrganizationMemberRole(
+        _ member: WisentOrganizationMember,
+        role: String
+    ) async {
+        guard ["owner", "admin", "member"].contains(role) else {
+            organizationError = "Choose a valid organization role."
+            return
+        }
+        await performOrganizationOperation { session, organization in
+            try await client.updateMemberRole(
+                userID: member.userID,
+                role: role,
+                organizationID: organization.id,
+                session: session
+            )
         }
     }
 
@@ -167,6 +283,12 @@ public final class WisentAuthStore: ObservableObject {
         session = nil
         organizations = []
         selectedOrganization = nil
+        pendingInvitations = []
+        organizationMembers = []
+        organizationInvitations = []
+        inviteEmail = ""
+        inviteRole = "member"
+        organizationError = nil
         email = ""
         code = ""
         errorMessage = nil
@@ -238,6 +360,14 @@ public final class WisentAuthStore: ObservableObject {
         status = .resolvingOrganization
         errorMessage = nil
         do {
+            let invitations = try await client.pendingInvitations(session: session)
+            if !invitations.isEmpty {
+                pendingInvitations = invitations
+                status = .reviewingInvitations
+                return
+            }
+            pendingInvitations = []
+
             var available = try await client.organizations(session: session)
             if available.isEmpty {
                 let bootstrappedID = try await client.bootstrapOrganization(session: session)
@@ -264,6 +394,37 @@ public final class WisentAuthStore: ObservableObject {
         } catch {
             errorMessage = "Organization setup failed: \(Self.describe(error))"
             status = .signedOut
+        }
+    }
+
+    private func performOrganizationOperation(
+        _ operation: (WisentSession, WisentOrganization) async throws -> Void
+    ) async {
+        guard !isOrganizationBusy else { return }
+        guard await ensureFreshSession(),
+              let session,
+              let organization = selectedOrganization else {
+            organizationError = "Select an organization before managing its team."
+            return
+        }
+
+        isOrganizationBusy = true
+        organizationError = nil
+        defer { isOrganizationBusy = false }
+        do {
+            try await operation(session, organization)
+            async let members = client.organizationMembers(
+                organizationID: organization.id,
+                session: session
+            )
+            async let invitations = client.organizationInvitations(
+                organizationID: organization.id,
+                session: session
+            )
+            organizationMembers = try await members
+            organizationInvitations = try await invitations
+        } catch {
+            organizationError = Self.describe(error)
         }
     }
 

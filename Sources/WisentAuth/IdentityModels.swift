@@ -63,6 +63,59 @@ public struct WisentOrganization: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+public extension WisentOrganization {
+    var canManageMembers: Bool { role == "owner" || role == "admin" }
+}
+
+public struct WisentOrganizationMember: Codable, Sendable, Equatable, Identifiable {
+    public let userID: String
+    public let email: String
+    public let role: String
+    public let createdAt: Date?
+
+    public var id: String { userID }
+
+    enum CodingKeys: String, CodingKey {
+        case userID = "user_id"
+        case email
+        case role
+        case createdAt = "created_at"
+    }
+}
+
+public struct WisentOrganizationInvite: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let email: String
+    public let role: String
+    public let expiresAt: Date?
+    public let createdAt: Date?
+    enum CodingKeys: String, CodingKey {
+        case id
+        case email
+        case role
+        case expiresAt = "expires_at"
+        case createdAt = "created_at"
+    }
+}
+
+public struct WisentUserInvite: Codable, Sendable, Equatable, Identifiable {
+    public let id: String
+    public let organizationID: String
+    public let organizationName: String
+    public let role: String
+    public let expiresAt: Date?
+    let token: String
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case organizationID = "org_id"
+        case organizationName = "org_name"
+        case role
+        case expiresAt = "expires_at"
+        case token
+    }
+}
+
 public struct WisentIdentity: Sendable, Equatable {
     public let userID: String
     public let email: String
