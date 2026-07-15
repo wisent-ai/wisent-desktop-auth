@@ -153,6 +153,9 @@ private struct WisentSignInView: View {
                         Button("Continue with GitHub") {
                             Task { await store.signInWithGitHub() }
                         }
+                        Button("Continue with Apple") {
+                            Task { await store.signInWithApple() }
+                        }
                     }
                     .disabled(store.isBusy)
                 }

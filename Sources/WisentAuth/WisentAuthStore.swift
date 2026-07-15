@@ -136,6 +136,10 @@ public final class WisentAuthStore: ObservableObject {
         await signInWithOAuth(provider: "github", label: "GitHub")
     }
 
+    public func signInWithApple() async {
+        await signInWithOAuth(provider: "apple", label: "Apple")
+    }
+
     public func changeEmail() {
         code = ""
         errorMessage = nil
