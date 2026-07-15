@@ -1,7 +1,6 @@
 import AppKit
 import AuthenticationServices
 import Combine
-import CryptoKit
 import Foundation
 
 public enum WisentAuthStatus: Equatable {
@@ -33,7 +32,6 @@ public final class WisentAuthStore: ObservableObject {
     private var started = false
     private var refreshTask: Task<Void, Never>?
     private var webSession: DesktopWebAuthSession?
-    private var appleRawNonce = ""
     private static let refreshLeadTime: TimeInterval = 5 * 60
 
     public convenience init(productName: String) {
@@ -138,33 +136,7 @@ public final class WisentAuthStore: ObservableObject {
         await signInWithOAuth(provider: "github", label: "GitHub")
     }
 
-    public func configureAppleRequest(_ request: ASAuthorizationAppleIDRequest) {
-        let nonce = Self.makeAppleNonce()
-        appleRawNonce = nonce
-        request.requestedScopes = [.email, .fullName]
-        request.nonce = Self.sha256Hex(nonce)
-    }
 
-    public func completeAppleAuthorization(_ result: Result<ASAuthorization, Error>) async {
-        switch result {
-        case .failure(let error):
-            guard (error as? ASAuthorizationError)?.code != .canceled else { return }
-            errorMessage = Self.describe(error)
-        case .success(let authorization):
-            guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
-                  let tokenData = credential.identityToken,
-                  let idToken = String(data: tokenData, encoding: .utf8),
-                  !appleRawNonce.isEmpty else {
-                errorMessage = "Apple did not return a usable identity token."
-                return
-            }
-            let nonce = appleRawNonce
-            await perform {
-                let newSession = try await client.signInWithApple(idToken: idToken, nonce: nonce)
-                try await accept(newSession)
-            }
-        }
-    }
 
     public func changeEmail() {
         code = ""
@@ -320,20 +292,7 @@ public final class WisentAuthStore: ObservableObject {
         }
     }
 
-    private static func makeAppleNonce() -> String {
-        var generator = SystemRandomNumberGenerator()
-        return Data((0..<32).map { _ in UInt8.random(in: 0...255, using: &generator) })
-            .base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-    }
 
-    private static func sha256Hex(_ input: String) -> String {
-        SHA256.hash(data: Data(input.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
-    }
 
     private static func describe(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

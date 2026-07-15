@@ -1,4 +1,3 @@
-import AuthenticationServices
 import SwiftUI
 
 private struct WisentIdentityEnvironmentKey: EnvironmentKey {
@@ -154,16 +153,6 @@ private struct WisentSignInView: View {
                         Button("Continue with GitHub") {
                             Task { await store.signInWithGitHub() }
                         }
-                        SignInWithAppleButton(.signIn) { request in
-                            store.configureAppleRequest(request)
-                        } onCompletion: { result in
-                            Task { @MainActor in
-                                await store.completeAppleAuthorization(result)
-                            }
-                        }
-                        .signInWithAppleButtonStyle(.black)
-                        .frame(width: 145, height: 28)
-                        .accessibilityIdentifier("wisent.auth.apple")
                     }
                     .disabled(store.isBusy)
                 }
