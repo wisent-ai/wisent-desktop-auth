@@ -157,6 +157,8 @@ public final class WisentAuthStore: ObservableObject {
         selectedOrganization = organization
         organizationMembers = []
         organizationInvitations = []
+        inviteEmail = ""
+        inviteRole = "member"
         organizationError = nil
         status = .ready
         do {
@@ -220,8 +222,15 @@ public final class WisentAuthStore: ObservableObject {
             organizationError = "Enter a valid email address."
             return
         }
-        guard ["owner", "admin", "member"].contains(inviteRole) else {
-            organizationError = "Choose a valid organization role."
+        guard let organization = selectedOrganization, organization.canManageMembers else {
+            organizationError = "Your organization role cannot send invitations."
+            return
+        }
+        let allowedRoles = organization.role == "owner"
+            ? ["owner", "admin", "member"]
+            : ["admin", "member"]
+        guard allowedRoles.contains(inviteRole) else {
+            organizationError = "Choose a role allowed by your organization access."
             return
         }
         await performOrganizationOperation { session, organization in
