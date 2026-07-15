@@ -24,6 +24,7 @@ public final class WisentAuthStore: ObservableObject {
     @Published public private(set) var errorMessage: String?
 
     public let productName: String
+    public var oauthEnabled: Bool { configuration.oauthEnabled }
 
     private let configuration: WisentAuthConfiguration
     private let client: SupabaseIdentityClient

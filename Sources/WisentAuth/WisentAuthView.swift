@@ -138,22 +138,24 @@ private struct WisentSignInView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(store.isBusy)
 
-                HStack(spacing: 8) {
-                    Rectangle().fill(.secondary.opacity(0.25)).frame(height: 1)
-                    Text("or").font(.caption).foregroundStyle(.secondary)
-                    Rectangle().fill(.secondary.opacity(0.25)).frame(height: 1)
-                }
-                .frame(width: 280)
+                if store.oauthEnabled {
+                    HStack(spacing: 8) {
+                        Rectangle().fill(.secondary.opacity(0.25)).frame(height: 1)
+                        Text("or").font(.caption).foregroundStyle(.secondary)
+                        Rectangle().fill(.secondary.opacity(0.25)).frame(height: 1)
+                    }
+                    .frame(width: 280)
 
-                HStack(spacing: 10) {
-                    Button("Continue with Google") {
-                        Task { await store.signInWithGoogle() }
+                    HStack(spacing: 10) {
+                        Button("Continue with Google") {
+                            Task { await store.signInWithGoogle() }
+                        }
+                        Button("Continue with GitHub") {
+                            Task { await store.signInWithGitHub() }
+                        }
                     }
-                    Button("Continue with GitHub") {
-                        Task { await store.signInWithGitHub() }
-                    }
+                    .disabled(store.isBusy)
                 }
-                .disabled(store.isBusy)
             }
 
             if store.isBusy {

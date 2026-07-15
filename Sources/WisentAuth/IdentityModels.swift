@@ -6,17 +6,20 @@ public struct WisentAuthConfiguration: Sendable, Equatable {
     public let anonKey: String
     public let redirectURL: String
     public let callbackScheme: String
+    public let oauthEnabled: Bool
 
     public init(
         supabaseURL: String,
         anonKey: String,
         redirectURL: String,
-        callbackScheme: String
+        callbackScheme: String,
+        oauthEnabled: Bool
     ) {
         self.supabaseURL = supabaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         self.anonKey = anonKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.redirectURL = redirectURL
         self.callbackScheme = callbackScheme
+        self.oauthEnabled = oauthEnabled
     }
 
     public static func production(bundleIdentifier: String) -> WisentAuthConfiguration {
@@ -26,7 +29,8 @@ public struct WisentAuthConfiguration: Sendable, Equatable {
             supabaseURL: environment["SUPABASE_URL"] ?? "https://alvaewvbyxpgwdpugnxy.supabase.co",
             anonKey: environment["SUPABASE_ANON_KEY"] ?? "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFsdmFld3ZieXhwZ3dkcHVnbnh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzOTc5NDcsImV4cCI6MjA5Njk3Mzk0N30.xkkJ36ZTwtqyVZLFju0vc9S25grTuKbj9ILKlsXdUPA",
             redirectURL: environment["WISENT_AUTH_REDIRECT_URL"] ?? "\(callbackScheme)://auth-callback",
-            callbackScheme: callbackScheme
+            callbackScheme: callbackScheme,
+            oauthEnabled: environment["WISENT_AUTH_OAUTH_ENABLED"] == "1"
         )
     }
 
