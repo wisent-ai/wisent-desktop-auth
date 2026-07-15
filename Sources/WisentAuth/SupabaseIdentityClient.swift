@@ -56,6 +56,14 @@ actor SupabaseIdentityClient {
         return try Self.decodeSession(data)
     }
 
+    func signInWithApple(idToken: String, nonce: String) async throws -> WisentSession {
+        let data = try await authPOST(
+            path: "/auth/v1/token?grant_type=id_token",
+            body: ["provider": "apple", "id_token": idToken, "nonce": nonce]
+        )
+        return try Self.decodeSession(data)
+    }
+
     func organizations(session identity: WisentSession) async throws -> [WisentOrganization] {
         let userID = Self.queryValue(identity.userID)
         let data = try await rest(
