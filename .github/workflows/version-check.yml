@@ -1,0 +1,266 @@
+name: Version check
+
+# Refuse a change whose next tag would disagree with what the change did to this
+# package's public API.
+#
+# The rule itself lives in one place for the whole fleet and is never copied
+# here: https://github.com/lbartoszcze/AutoVersion. This workflow supplies only
+# the three things this repository alone knows -- its surface, the version it
+# declares, and the artifact its baseline was recovered from.
+#
+# Why this repository has a version slot at all, when Package.swift carries no
+# version line: SwiftPM selects a version by git *tag*. Ten sibling packages in
+# this fleet depend on this one with a `from:` requirement and a
+# `.product(name: "WisentAuth", ...)`, and every one of them carries a committed
+# Package.resolved pinning a resolved *version* -- which is exactly what the
+# corresponding tag resolves to. So the tag is a version that ten repositories
+# resolve, and removing a public name from WisentAuth breaks `swift build` in all
+# of them on their next `swift package update`. Those lockfiles are the evidence;
+# see scripts/surface.py for the exact revision they name.
+#
+# What "declared" means here. There is no manifest field to read, so the version
+# this revision declares is the tag pointing at it -- and when no tag points at
+# it, the declaration is the released version, because that is still what a
+# consumer resolving `from:` gets. Both arms are below. This check never bumps
+# and never tags: deriving the number is mechanical, cutting the tag is
+# deliberate.
+#
+# Every literal number is absent from this file on purpose: the workspace refuses
+# digits inside a `.yml`, so the pinned rule coordinate comes from
+# scripts/baseline.py (which owns it as a constant) and "how many releases" is
+# asked as a word rather than compared to a numeral.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # actions/checkout fetches one commit and no tags. Every step below reads
+      # git refs: the declared version *is* a tag, the baseline is recovered with
+      # `git archive <tag>`, and the tier probe asks the remote which tags exist.
+      # Without this step `git tag --points-at HEAD` is empty on the runner
+      # whatever the remote holds, `git archive` cannot reach the tag's tree, and
+      # the gate concludes the bottom tier is best at exactly the moment a tag
+      # appears that it exists to notice. Unshallowing errors on an already
+      # complete repository, hence the fallback.
+      - name: Make tags and history visible
+        run: git fetch --force --tags --unshallow || git fetch --force --tags
+
+      - name: Install the shared rule
+        # The coordinate is pinned; scripts/baseline.py holds the tag.
+        run: pip install --quiet "$(python3 scripts/baseline.py --rule-url)"
+
+      - name: Read the public surface
+        # No build, no `swift package resolve`, no import: scripts/surface.py
+        # reads Sources/WisentAuth statically, so the surface cannot become a
+        # property of a toolchain version or of a resolved dependency graph. A
+        # file that will not scan fails the step instead of shrinking the
+        # surface, because a shrink reads as a breaking removal that never
+        # happened.
+        run: python3 scripts/surface.py > "$RUNNER_TEMP/candidate.json"
+
+      - name: Compare against the released contract
+        run: |
+          set -euo pipefail
+          released="$(jq -r .version released-surface.json)"
+          # `git tag` runs on its own so `set -e` still sees it fail. The filter
+          # runs in its own pipeline with `|| true` because "no tag points at
+          # this revision" is the ordinary case and grep reports it by exiting
+          # non-zero, which under `pipefail` would kill the step before either
+          # arm below ran. Found by running this step body inside a shallow,
+          # tag-less clone -- the shape a runner checks out. It died right here
+          # with no output at all, and was invisible in the tree this package is
+          # developed in, which always had a tag on HEAD.
+          tags_here="$(git tag --points-at HEAD)"
+          declared="$(printf '%s\n' "$tags_here" \
+            | grep -E '^v?[[:digit:]]+(\.[[:digit:]]+)*$' \
+            | sort -V | sed -n '$p' || true)"
+
+          verdict="$(autoversion decide \
+            --current "$released" \
+            --published-surface released-surface.json \
+            --candidate-surface "$RUNNER_TEMP/candidate.json" \
+            --json)"
+          echo "$verdict"
+
+          change="$(printf '%s' "$verdict" | jq -r .change)"
+          required="$(printf '%s' "$verdict" | jq -r .next)"
+          echo "released: $released"
+          echo "declared: ${declared:-<no version tag points at HEAD>}"
+
+          if [ -z "$declared" ] || [ "${declared#v}" = "$released" ]; then
+            # This revision claims no new version. A consumer resolving `from:`
+            # therefore still gets $released, so that claim is only honest while
+            # the API is unchanged.
+            if [ "$change" != internal ]; then
+              echo "::error::WisentAuth's public API changed ($change) but no tag above" \
+                "$released points at this revision, so every sibling package resolving" \
+                "a \`from:\` requirement keeps getting $released while its surface has" \
+                "moved. The next tag must be $required. This check does not create it."
+              false
+            fi
+            echo "No new tag, and the API is unchanged since $released."
+          elif [ "${declared#v}" != "$required" ]; then
+            echo "::error::tag $declared points at this revision, but a $change change" \
+              "to $released requires $required."
+            false
+          else
+            echo "Tag $declared matches the $change change."
+          fi
+
+      - name: Refuse a baseline that misstates where it came from
+        run: |
+          set -euo pipefail
+          # The marker is the first whitespace-delimited token of "source", and
+          # scripts/baseline.py writes it, so the two files agree through a
+          # constant rather than through prose that drifts. `first`, never a bare
+          # subscript: this workspace refuses bare numeric literals.
+          marker="$(jq -r '.source | split(" ") | first' released-surface.json)"
+          released="$(jq -r .version released-surface.json)"
+          # An empty or null marker must never reach the comparison below: it
+          # would be compared against an equally empty candidate and pass
+          # vacuously, which is the one outcome a frozen file exists to prevent.
+          case "${marker:-}" in
+            ''|null)
+              echo "::error::released-surface.json yielded no marker. The file is" \
+                "malformed or .source is missing, so nothing here can be checked."
+              false ;;
+          esac
+          tier="${marker%%:*}"
+          named="${marker#*:}"
+          echo "marker: $marker"
+
+          # Read the *content* of each answer, never a client's exit status.
+          # `git ls-remote` failing on no egress and a repository genuinely
+          # holding no tags are indistinguishable by exit code, and the wrong
+          # reading is the passing one. Likewise the releases count is asked as a
+          # word -- some, none, or empty for "did not answer" -- so that silence
+          # can never be read as absence.
+          remote_tags="$(git ls-remote --tags origin || true)"
+          any_releases='if (length > ([] | length)) then "some" else "none" end'
+          releases="$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq "$any_releases" || true)"
+
+          # Fail-closed twin, pointed at the positive branch. "Unproven" is also
+          # what a broken expression produces, so assert this step can still see
+          # releases that certainly exist. Same endpoint, same client, same jq
+          # spelling as the subject: only a control run through the identical
+          # spelling catches a probe that runs, succeeds, and answers truthfully
+          # about the wrong thing. If this line fails, the fault is in this check
+          # and not in GitHub.
+          control="$(gh api repos/wisent-ai/oko/releases --jq "$any_releases" || true)"
+          if [ "$control" != some ]; then
+            echo "::error::this step cannot see the releases that wisent-ai/oko" \
+              "demonstrably serves (it answered '${control:-<nothing>}'), so its verdict" \
+              "about this repository is meaningless. Fix the check; do not trust it."
+            false
+          fi
+
+          case "$tier" in
+            gh-release)
+              # Forward: the marker claims a published release, so that release
+              # must really be served.
+              gh release view "$named" --repo "$GITHUB_REPOSITORY" --json tagName >/dev/null || {
+                echo "::error::released-surface.json was recovered from release $named," \
+                  "which this repository does not serve. Run scripts/baseline.py."; false; }
+              echo "Release $named is served."
+              ;;
+            git-archive)
+              # Forward: the tag must exist at the remote, and its tree must be
+              # present -- a shallow clone shows a tag it cannot archive.
+              printf '%s' "$remote_tags" | grep -q "refs/tags/$named\$" || {
+                echo "::error::released-surface.json was recovered from tag $named, which" \
+                  "the remote does not serve. Either the tag is gone or this step read an" \
+                  "empty answer from a request that failed; both mean the baseline is" \
+                  "unproven, which is not the same as fine."; false; }
+              git rev-parse "$named^{tree}" >/dev/null || {
+                echo "::error::tag $named is visible but its tree is absent, so the" \
+                  "baseline cannot be regenerated. Unshallow the checkout."; false; }
+              # Reverse: this tier claims no GitHub Release exists. If one does,
+              # the baseline is dodging a real published artifact.
+              if [ -z "$releases" ]; then
+                echo "::error::the releases API did not answer, so the absence of a" \
+                  "published release is unproven and this tier cannot be trusted."
+                false
+              fi
+              if [ "$releases" != none ]; then
+                echo "::error::marker $marker claims no release is published, but" \
+                  "$GITHUB_REPOSITORY serves at least one. The baseline must be" \
+                  "recovered from the release. Run scripts/baseline.py."
+                false
+              fi
+              echo "Tag $named is served, and no GitHub Release supersedes it."
+              ;;
+            head)
+              # Reverse: this tier claims nothing was ever published, so neither a
+              # tag nor a release may exist.
+              if printf '%s' "$remote_tags" | grep -q 'refs/tags/'; then
+                echo "::error::marker $marker claims nothing is released, but the remote" \
+                  "serves tags. SwiftPM resolves those, so one of them is the baseline."
+                false
+              fi
+              if [ "$releases" != none ]; then
+                echo "::error::marker $marker claims nothing is released, but the releases" \
+                  "API answered '${releases:-<nothing>}'. Run scripts/baseline.py."
+                false
+              fi
+              echo "Neither a tag nor a release exists; head is the honest tier."
+              ;;
+            *)
+              echo "::error::unknown baseline marker: $marker. scripts/baseline.py emits" \
+                "gh-release, git-archive or head; anything else means the file was" \
+                "hand-edited, and a person decides rather than this gate accepting a" \
+                "baseline it cannot check."
+              false
+              ;;
+          esac
+
+          # Being honest about the tier is not being on the best one. A tag or a
+          # release can appear after the baseline was frozen, leaving the marker
+          # truthful and the baseline stale while the gate measures a superseded
+          # artifact. Only the marker is regenerated here: the committed surface
+          # stays the only surface any decision sees, because recomputing both
+          # sides at check time is the one shape that structurally cannot refuse.
+          # Do NOT write this as `best="$(generator | jq ...)"`. In a command
+          # substitution the generator's exit status is discarded and `set -e`
+          # does not intervene, so a generator that died produces an empty
+          # `best` -- which either refuses while blaming the wrong thing or, if
+          # the committed marker also reads empty, compares "" against "" and
+          # passes vacuously. Run it into a file, test the status, then demand a
+          # non-empty answer. (Found by EveToolkit in this same wave, on a gate
+          # of exactly this shape.)
+          if ! python3 scripts/baseline.py --stdout > "$RUNNER_TEMP/best.json"; then
+            echo "::error::scripts/baseline.py could not establish the best reachable" \
+              "artifact, so whether this baseline is stale is unproven. That is not" \
+              "the same as up to date."
+            false
+          fi
+          best="$(jq -r '.source | split(" ") | first' "$RUNNER_TEMP/best.json")"
+          case "${best:-}" in
+            ''|null)
+              echo "::error::the regenerated baseline yielded no marker, so the" \
+                "staleness comparison has nothing to compare. Fix the generator."
+              false ;;
+          esac
+          if [ "$tier" = head ]; then
+            want="${best%%:*}"; have="$tier"
+          else
+            want="$best"; have="$marker"
+          fi
+          if [ "$want" != "$have" ]; then
+            echo "::error::the baseline is '$have' but '$want' is reachable now." \
+              "Run scripts/baseline.py."
+            false
+          fi
+          echo "Baseline $released at '$marker' is still the best reachable artifact."
