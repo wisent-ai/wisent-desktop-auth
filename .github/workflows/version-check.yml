@@ -225,21 +225,55 @@ jobs:
           # word -- some, none, or empty for "did not answer" -- so that silence
           # can never be read as absence.
           remote_tags="$(git ls-remote --tags origin || true)"
-          any_releases='if (length > ([] | length)) then "some" else "none" end'
-          releases="$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq "$any_releases" || true)"
+          any_entries='if (length > ([] | length)) then "some" else "none" end'
+          releases="$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq "$any_entries" || true)"
 
-          # Fail-closed twin, pointed at the positive branch. "Unproven" is also
-          # what a broken expression produces, so assert this step can still see
-          # releases that certainly exist. Same endpoint, same client, same jq
-          # spelling as the subject: only a control run through the identical
-          # spelling catches a probe that runs, succeeds, and answers truthfully
-          # about the wrong thing. If this line fails, the fault is in this check
-          # and not in GitHub.
-          control="$(gh api repos/wisent-ai/oko/releases --jq "$any_releases" || true)"
-          if [ "$control" != some ]; then
-            echo "::error::this step cannot see the releases that wisent-ai/oko" \
-              "demonstrably serves (it answered '${control:-<nothing>}'), so its verdict" \
-              "about this repository is meaningless. Fix the check; do not trust it."
+          # Fail-closed twin, pointed at the positive branch, on a subject THIS
+          # job's own credential can reach. "Unproven" is also what a broken
+          # expression produces, so this step must prove it can still recognise a
+          # fact that certainly holds.
+          #
+          # The first spelling asked whether it could see wisent-ai/oko's
+          # releases. Same organisation, same private visibility, same endpoint --
+          # and unreachable: a runner's `secrets.GITHUB_TOKEN` is scoped to the
+          # repository running the job, so a private foreign repository answers
+          # `Not Found` exactly like an absence and the control refuses on every
+          # single run. Measured: repos/wisent-ai/oko is private, and
+          # unauthenticated -- which is what a foreign-scoped token amounts to --
+          # its releases read "Not Found". That is a permanently red gate, worth
+          # exactly what a sleeping one is worth. A control that needs wider
+          # access than the subject is not a control; it is a second subject.
+          #
+          # This repository serves no releases at all -- that is precisely why its
+          # tier is a tag -- so it cannot control the releases probe on itself.
+          # What it can demand is everything that probe depends on and shares: the
+          # same host, the same client, the same credential, the same jq spelling,
+          # under this repository's own slug. Two demands, and each catches what
+          # the other cannot:
+          #
+          #   the API must name THIS repository back -- a permission refusal, a
+          #   rate-limit page or an expired token cannot fake `full_name`, and
+          #   asking about our own slug cannot be a wrong subject;
+          #
+          #   while the remote holds tags, the API's LIST endpoint must show some
+          #   too -- authorised silence on our own slug yields an empty list from
+          #   the API while `git ls-remote` still lists eight, and that
+          #   disagreement between two transports is exactly the state a control
+          #   exists to catch. It also covers the list handling the releases probe
+          #   uses, which naming alone would not.
+          named_back="$(gh api "repos/$GITHUB_REPOSITORY" --jq .full_name || true)"
+          if [ "$named_back" != "$GITHUB_REPOSITORY" ]; then
+            echo "::error::the API did not name $GITHUB_REPOSITORY back (it answered" \
+              "'${named_back:-<nothing>}'), so this step cannot read its own repository" \
+              "and every absence below is unproven. Fix the check; do not trust it."
+            false
+          fi
+          api_tags="$(gh api "repos/$GITHUB_REPOSITORY/tags" --jq "$any_entries" || true)"
+          if printf '%s' "$remote_tags" | grep -q 'refs/tags/' \
+             && [ "$api_tags" != some ]; then
+            echo "::error::git lists tags for $GITHUB_REPOSITORY but the API answered" \
+              "'${api_tags:-<nothing>}' about them, so its list endpoint is silent about a" \
+              "fact that certainly holds and no verdict below means anything."
             false
           fi
 

@@ -97,12 +97,14 @@ RULE_URL = "git+https://github.com/lbartoszcze/AutoVersion@" + RULE_PIN
 # tag tiers, which is a decision for a person, not for this script.
 EXPECTED_WORKFLOWS = frozenset({"version-check.yml"})
 
-# Positive control for the releases probe: same organisation, same private
-# visibility, same endpoint spelling, and eleven published releases. If this
-# comes back empty the probe has stopped being able to recognise a release that
-# certainly exists, and the fault is in this script — not in GitHub, and not in
-# the subject.
-CONTROL_REPO = "wisent-ai/oko"
+# There is deliberately no foreign control repository here. The first spelling of the
+# positive control below asserted it could read `wisent-ai/oko`'s releases -- same
+# organisation, same private visibility, same endpoint -- and a runner cannot reach it:
+# `secrets.GITHUB_TOKEN` is scoped to the repository running the job, so a private
+# foreign repository answers 404 exactly like an absence and the control refuses on
+# every run. Measured: that repository is private, and unauthenticated its releases read
+# "Not Found". A control that needs wider access than the subject is not a control; it
+# is a second subject.
 
 API_ROOT = "https://api.github.com/repos"
 REMOTE = "origin"
@@ -201,20 +203,77 @@ def published_release_tags(slug: str) -> list[str]:
     return [entry["tag_name"] for entry in payload if not entry.get("draft")]
 
 
-def assert_probe_can_see_releases() -> None:
-    """Fail-closed twin: prove the probe still recognises a real release."""
+def repository_tag_names(slug: str) -> list[str]:
+    """Tag names the API serves for one repository, or a refusal.
+
+    Same client, same credential, same JSON-list handling as the releases probe, so it
+    is the strongest control available for that probe on a repository which -- being on
+    a tag tier -- has no releases of its own to recognise.
+    """
+    status, body = api_get(f"{slug}/tags?per_page=100")
+    if status is not HTTPStatus.OK:
+        excerpt = " ".join(body.split())[: len(API_ROOT + API_ROOT)]
+        raise BaselineError(
+            f"the tags API answered {status} for {slug}, so this probe cannot read the "
+            f"repository it is asking about: {excerpt!r}"
+        )
     try:
-        control = published_release_tags(CONTROL_REPO)
-    except BaselineError as error:
+        payload = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise BaselineError(f"the tags API for {slug} did not answer with JSON: {error}") from error
+    if not isinstance(payload, list):
+        raise BaselineError(f"the tags API for {slug} answered {type(payload).__name__}, not a list")
+    return [entry["name"] for entry in payload if entry.get("name")]
+
+
+def assert_probe_can_see_this_repository(slug: str, root: Path) -> None:
+    """Fail-closed twin, on a subject this job's own credential can reach.
+
+    "Unproven" is also what a broken expression produces, so the probe must prove it can
+    still recognise a fact that certainly holds. This repository serves no releases --
+    that is exactly why its tier is a tag -- so it cannot control the releases probe on
+    itself with a release. What it can demand is everything that probe depends on and
+    shares, under its own slug:
+
+      the API names THIS repository back. A permission refusal, a rate-limit page or an
+      expired token cannot fake `full_name`, and a question about our own slug cannot be
+      a wrong subject -- which is the failure class neither a control nor content-reading
+      catches when the control is somebody else's repository.
+
+      while the remote holds tags, the API's list endpoint shows some too. Authorised
+      silence on our own slug yields an empty list while `git ls-remote` still lists
+      eight, and that disagreement between two transports is the state a control exists
+      to catch. It also exercises the list handling the releases probe uses, which
+      naming alone would not.
+
+    A repository with no tags at all is not failed for it: there the tier is head, and
+    demanding tags would invent the mirror defect -- a gate that can never pass.
+    """
+    status, body = api_get(slug)
+    if status is not HTTPStatus.OK:
         raise BaselineError(
-            f"the releases probe could not read {CONTROL_REPO}, which certainly has "
-            f"published releases, so its verdict about this repository is meaningless: {error}"
-        ) from error
-    if not control:
+            f"the API answered {status} for {slug}, so this probe cannot read the "
+            "repository it is asking about, and every absence it reports is unproven"
+        )
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError as error:
+        raise BaselineError(f"the API for {slug} did not answer with JSON: {error}") from error
+    named = payload.get("full_name", "") if isinstance(payload, dict) else ""
+    if named.lower() != slug.lower():
         raise BaselineError(
-            f"the releases probe reports no published release for {CONTROL_REPO}, which "
-            "certainly has several. This step cannot recognise a release GitHub serves, "
-            "so the fault is in this check and not in the registry."
+            f"the API did not name {slug} back -- it answered {named!r} -- so this probe "
+            "is not reading the repository it believes it is reading"
+        )
+    over_git = remote_tags(root)
+    if not over_git:
+        return
+    over_api = repository_tag_names(slug)
+    if not over_api:
+        raise BaselineError(
+            f"{REMOTE} lists {len(over_git)} tags for {slug} but the API's list endpoint "
+            "shows none, so it is silent about a fact that certainly holds and no "
+            "absence it reports can be believed"
         )
 
 
@@ -335,7 +394,7 @@ def assert_publishes_nothing(root: Path) -> None:
 def build(root: Path) -> dict:
     assert_publishes_nothing(root)
     slug = repo_slug(root)
-    assert_probe_can_see_releases()
+    assert_probe_can_see_this_repository(slug, root)
     releases = published_release_tags(slug)
     tags = remote_tags(root)
 
