@@ -1,7 +1,7 @@
 # Wisent Desktop Auth
 
 <!-- wisent-readme-signals:start -->
-[![CI](https://github.com/wisent-ai/wisent-desktop-auth/actions/workflows/version-check.yml/badge.svg?branch=main)](https://github.com/wisent-ai/wisent-desktop-auth/actions/workflows/version-check.yml)
+[![Version check](https://github.com/wisent-ai/wisent-desktop-auth/actions/workflows/version-check.yml/badge.svg?branch=main)](https://github.com/wisent-ai/wisent-desktop-auth/actions/workflows/version-check.yml)
 [![Release](https://img.shields.io/github/v/release/wisent-ai/wisent-desktop-auth?display_name=tag&sort=semver)](https://github.com/wisent-ai/wisent-desktop-auth/releases)
 [![Downloads](https://img.shields.io/github/downloads/wisent-ai/wisent-desktop-auth/total)](https://github.com/wisent-ai/wisent-desktop-auth/releases)
 [![License](https://img.shields.io/github/license/wisent-ai/wisent-desktop-auth)](https://github.com/wisent-ai/wisent-desktop-auth)
