@@ -1,5 +1,14 @@
 # Wisent Desktop Auth
 
+<!-- wisent-readme-signals:start -->
+[![CI](https://github.com/wisent-ai/wisent-desktop-auth/actions/workflows/version-check.yml/badge.svg?branch=main)](https://github.com/wisent-ai/wisent-desktop-auth/actions/workflows/version-check.yml)
+[![Release](https://img.shields.io/github/v/release/wisent-ai/wisent-desktop-auth?display_name=tag&sort=semver)](https://github.com/wisent-ai/wisent-desktop-auth/releases)
+[![Downloads](https://img.shields.io/github/downloads/wisent-ai/wisent-desktop-auth/total)](https://github.com/wisent-ai/wisent-desktop-auth/releases)
+[![License](https://img.shields.io/github/license/wisent-ai/wisent-desktop-auth)](https://github.com/wisent-ai/wisent-desktop-auth)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Wisent-5865F2?logo=discord&logoColor=white)](https://discord.gg/qRjpkthq54)
+<!-- wisent-readme-signals:end -->
+
+
 Shared Swift package for Wisent macOS applications that need a consistent sign-in UI, Supabase identity session handling, failure classification, and Keychain-backed credential storage.
 
 ## Scope
