@@ -130,28 +130,130 @@ public struct WisentIdentity: Sendable, Equatable {
     }
 }
 
+/// Evidence that this process restored a previously persisted host identity.
+///
+/// The initializer is intentionally internal. Host applications can observe
+/// this value, but cannot manufacture it from a sign-in button or callback.
+/// ``WisentAuthStore`` publishes it only after a stored session has resolved a
+/// real organization and reached the ready state.
+public struct WisentRestoredIdentity: Sendable, Equatable {
+    public let userID: String
+    public let organizationID: String
+    public let sessionExpiresAt: Date
+    public let observedAt: Date
+
+    package init(
+        userID: String,
+        organizationID: String,
+        sessionExpiresAt: Date,
+        observedAt: Date
+    ) {
+        self.userID = userID
+        self.organizationID = organizationID
+        self.sessionExpiresAt = sessionExpiresAt
+        self.observedAt = observedAt
+    }
+}
+
+/// Every failure this library can produce, each one already knowing which
+/// dependency it belongs to and how it should be named to a person.
+///
+/// The payloads are raw on purpose — an upstream body, a URL, an `OSStatus`.
+/// None of them reach ``errorDescription``; they are reachable only through
+/// ``diagnostic``, which only ``WisentFailureClassifier`` reads, and only to
+/// write it to the operator log.
 enum WisentAuthError: LocalizedError {
+    case notConfigured(String)
     case malformedURL(String)
-    case invalidResponse
-    case http(Int, String)
+    case invalidResponse(WisentFailurePoint)
+    case http(WisentUpstreamResponse, WisentFailurePoint)
     case malformedSession
     case noOrganization
     case keychain(OSStatus)
+    case webAuthenticationTimedOut
+    case oauthRejected(String)
 
-    var errorDescription: String? {
+    var point: WisentFailurePoint {
         switch self {
-        case let .malformedURL(value): "Invalid authentication URL: \(value)"
-        case .invalidResponse: "The identity service returned an invalid response."
-        case let .http(status, body): "Identity request failed (\(status)): \(Self.safe(body))"
-        case .malformedSession: "The identity service did not return a complete session."
-        case .noOrganization: "No organization is available for this account."
-        case let .keychain(status): "The session could not be stored securely (Keychain status \(status))."
+        case .notConfigured, .malformedURL: .configuration
+        case let .invalidResponse(point): point
+        case let .http(_, point): point
+        case .malformedSession: .session
+        case .noOrganization: .organizations
+        case .keychain: .storage
+        case .webAuthenticationTimedOut: .oauthAuthorize
+        case .oauthRejected: .oauthCallback
         }
     }
 
-    private static func safe(_ body: String) -> String {
-        let singleLine = body.split(whereSeparator: \.isNewline).joined(separator: " ")
-        return String(singleLine.prefix(240))
+    /// A Wisent service fronting the identity provider may name the impact
+    /// itself; otherwise the call site's own impact stands.
+    var impact: WisentFailureImpact {
+        guard case let .http(response, point) = self else { return self.point.impact }
+        return WisentFailureImpact(header: response.headerImpact) ?? point.impact
+    }
+
+    var code: WisentFailureCode {
+        switch self {
+        case .notConfigured, .malformedURL, .noOrganization:
+            .config
+        case let .http(response, point):
+            WisentFailureClassifier.code(for: response, service: point.service)
+        case .invalidResponse, .malformedSession:
+            // The transport or the identity provider handed us something that
+            // is not a session. That is our side being broken, and it must
+            // never surface as "no such account".
+            .infraDown
+        case .keychain:
+            .unknown
+        case .webAuthenticationTimedOut:
+            .timeout
+        case .oauthRejected:
+            .auth
+        }
+    }
+
+    /// A safe sentence that beats the generic taxonomy copy for this one case.
+    /// Still free of exception text, upstream bodies, paths and env var names.
+    var specificMessage: String? {
+        switch self {
+        case .noOrganization:
+            "This account isn't attached to any organization yet. This is a problem on our side — please contact support."
+        case .keychain:
+            "Your sign-in couldn't be stored securely on this Mac. Try again, and check your keychain if it keeps failing."
+        case .webAuthenticationTimedOut:
+            "Browser sign-in did not respond. Cancel it or try again."
+        default:
+            nil
+        }
+    }
+
+    /// Operator-only. Never rendered, never returned over a network.
+    var diagnostic: String? {
+        switch self {
+        case let .notConfigured(reason):
+            "identity configuration incomplete: \(reason)"
+        case let .malformedURL(value):
+            "malformed identity url: \(value)"
+        case let .invalidResponse(point):
+            "non-http response at \(point.id)"
+        case let .http(response, _):
+            "http \(response.status) header=\(response.headerCode ?? "-") body=\(response.body)"
+        case .malformedSession:
+            "session payload missing access_token, refresh_token or user id"
+        case .noOrganization:
+            "no organization rows visible after bootstrap"
+        case let .keychain(status):
+            "keychain osstatus \(status)"
+        case .webAuthenticationTimedOut:
+            "asWebAuthenticationSession produced no callback before its deadline"
+        case let .oauthRejected(detail):
+            "oauth callback carried no authorization code: \(detail)"
+        }
+    }
+
+    var errorDescription: String? {
+        WisentFailureClassifier.classify(self, point: point).message
     }
 }
 

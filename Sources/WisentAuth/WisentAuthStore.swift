@@ -18,11 +18,18 @@ public final class WisentAuthStore: ObservableObject {
     @Published public private(set) var status: WisentAuthStatus = .restoring
     @Published public private(set) var session: WisentSession?
     @Published public private(set) var organizations: [WisentOrganization] = []
+    @Published public private(set) var restoredIdentity: WisentRestoredIdentity?
     @Published public private(set) var selectedOrganization: WisentOrganization?
     @Published public var email = ""
     @Published public var code = ""
     @Published public private(set) var isBusy = false
+    @Published public private(set) var isOAuthBusy = false
     @Published public private(set) var errorMessage: String?
+
+    /// The classified form of ``errorMessage``. Lets a host app tell the user's
+    /// own mistake apart from our outage instead of colouring everything red,
+    /// and tells it whether retrying is worth a button.
+    @Published public private(set) var failure: WisentFailure?
     @Published public private(set) var pendingInvitations: [WisentUserInvite] = []
     @Published public private(set) var organizationMembers: [WisentOrganizationMember] = []
     @Published public private(set) var organizationInvitations: [WisentOrganizationInvite] = []
@@ -30,6 +37,7 @@ public final class WisentAuthStore: ObservableObject {
     @Published public var inviteRole = "member"
     @Published public private(set) var isOrganizationBusy = false
     @Published public private(set) var organizationError: String?
+    @Published public private(set) var organizationFailure: WisentFailure?
 
     public let productName: String
     public var oauthEnabled: Bool { configuration.oauthEnabled }
@@ -38,8 +46,10 @@ public final class WisentAuthStore: ObservableObject {
     private let client: SupabaseIdentityClient
     private let persistence: any IdentityPersistence
     private var started = false
+    private var restoredIdentityPending = false
     private var refreshTask: Task<Void, Never>?
-    private var webSession: DesktopWebAuthSession?
+    private var webSession: (any OAuthWebSession)?
+    private let webSessionFactory: @MainActor () -> any OAuthWebSession
     private static let refreshLeadTime: TimeInterval = 5 * 60
 
     public convenience init(productName: String) {
@@ -55,12 +65,14 @@ public final class WisentAuthStore: ObservableObject {
         productName: String,
         bundleIdentifier: String,
         configuration: WisentAuthConfiguration,
-        persistence: (any IdentityPersistence)? = nil
+        persistence: (any IdentityPersistence)? = nil,
+        webSessionFactory: (@MainActor () -> any OAuthWebSession)? = nil
     ) {
         self.productName = productName
         self.configuration = configuration
         client = SupabaseIdentityClient(configuration: configuration)
         self.persistence = persistence ?? KeychainIdentityStore(bundleIdentifier: bundleIdentifier)
+        self.webSessionFactory = webSessionFactory ?? { DesktopWebAuthSession() }
     }
 
     deinit {
@@ -81,7 +93,7 @@ public final class WisentAuthStore: ObservableObject {
         guard !started else { return }
         started = true
         guard configuration.isConfigured else {
-            errorMessage = "Wisent Identity is not configured."
+            report(WisentAuthError.notConfigured(configurationReason), point: .configuration)
             status = .signedOut
             return
         }
@@ -91,6 +103,7 @@ public final class WisentAuthStore: ObservableObject {
                 status = .signedOut
                 return
             }
+            restoredIdentityPending = true
             if stored.session.expiresAt.timeIntervalSinceNow <= Self.refreshLeadTime {
                 stored = StoredIdentity(
                     session: try await client.refresh(refreshToken: stored.session.refreshToken),
@@ -103,20 +116,27 @@ public final class WisentAuthStore: ObservableObject {
             scheduleRefresh(for: stored.session)
             await resolveOrganizations(preferredID: stored.selectedOrganizationID)
         } catch {
-            try? persistence.clear()
-            session = nil
+            // Only a rejected refresh token means the user is really signed
+            // out. Clearing the keychain because the network or the identity
+            // service blinked would force a pointless re-login and make an
+            // outage indistinguishable from an expired account.
+            let restore = report(error, point: .session)
+            if restore.code == .auth {
+                try? persistence.clear()
+                session = nil
+                restoredIdentityPending = false
+            }
             status = .signedOut
-            errorMessage = Self.describe(error)
         }
     }
 
     public func sendCode() async {
         let address = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard address.contains("@") else {
-            errorMessage = "Enter a valid email address."
+            note("Enter a valid email address.")
             return
         }
-        await perform {
+        await perform(point: .otpRequest) {
             try await client.requestOTP(email: address)
             email = address
             code = ""
@@ -127,10 +147,10 @@ public final class WisentAuthStore: ObservableObject {
     public func verifyCode() async {
         let token = code.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !token.isEmpty else {
-            errorMessage = "Enter the code from your email."
+            note("Enter the code from your email.")
             return
         }
-        await perform {
+        await perform(point: .otpVerify) {
             let newSession = try await client.verifyOTP(email: email, code: token)
             try await accept(newSession)
         }
@@ -148,7 +168,7 @@ public final class WisentAuthStore: ObservableObject {
 
     public func changeEmail() {
         code = ""
-        errorMessage = nil
+        clearFailure()
         status = .signedOut
     }
 
@@ -161,12 +181,13 @@ public final class WisentAuthStore: ObservableObject {
         inviteRole = "member"
         organizationError = nil
         status = .ready
+        publishRestoredIdentityIfReady()
         do {
             try persistence.save(
                 StoredIdentity(session: session, selectedOrganizationID: organization.id)
             )
         } catch {
-            errorMessage = Self.describe(error)
+            report(error, point: .storage)
         }
     }
 
@@ -176,7 +197,7 @@ public final class WisentAuthStore: ObservableObject {
               await ensureFreshSession(),
               let session else { return }
         isBusy = true
-        errorMessage = nil
+        clearFailure()
         defer { isBusy = false }
         do {
             let organizationID = try await client.acceptInvitation(invitation, session: session)
@@ -187,7 +208,7 @@ public final class WisentAuthStore: ObservableObject {
                 status = .reviewingInvitations
             }
         } catch {
-            errorMessage = "Invitation acceptance failed: \(Self.describe(error))"
+            report(error, point: .organizations)
         }
     }
 
@@ -197,7 +218,7 @@ public final class WisentAuthStore: ObservableObject {
               await ensureFreshSession(),
               let session else { return }
         isBusy = true
-        errorMessage = nil
+        clearFailure()
         defer { isBusy = false }
         do {
             try await client.declineInvitation(invitation, session: session)
@@ -208,7 +229,7 @@ public final class WisentAuthStore: ObservableObject {
                 status = .reviewingInvitations
             }
         } catch {
-            errorMessage = "Invitation decline failed: \(Self.describe(error))"
+            report(error, point: .organizations)
         }
     }
 
@@ -219,18 +240,18 @@ public final class WisentAuthStore: ObservableObject {
     public func sendOrganizationInvitation() async {
         let address = inviteEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard address.contains("@"), address.contains(".") else {
-            organizationError = "Enter a valid email address."
+            organizationNote("Enter a valid email address.")
             return
         }
         guard let organization = selectedOrganization, organization.canManageMembers else {
-            organizationError = "Your organization role cannot send invitations."
+            organizationNote("Your organization role cannot send invitations.")
             return
         }
         let allowedRoles = organization.role == "owner"
             ? ["owner", "admin", "member"]
             : ["admin", "member"]
         guard allowedRoles.contains(inviteRole) else {
-            organizationError = "Choose a role allowed by your organization access."
+            organizationNote("Choose a role allowed by your organization access.")
             return
         }
         await performOrganizationOperation { session, organization in
@@ -269,7 +290,7 @@ public final class WisentAuthStore: ObservableObject {
         role: String
     ) async {
         guard ["owner", "admin", "member"].contains(role) else {
-            organizationError = "Choose a valid organization role."
+            organizationNote("Choose a valid organization role.")
             return
         }
         await performOrganizationOperation { session, organization in
@@ -282,6 +303,27 @@ public final class WisentAuthStore: ObservableObject {
         }
     }
 
+    public func cancelOAuthSignIn() {
+        webSession?.cancel()
+    }
+
+    /// Re-runs whatever a retryable failure interrupted. An outage should cost
+    /// the user a click, not a password reset, so the stored session is kept
+    /// and restored again instead of being thrown away.
+    public func retry() async {
+        guard failure?.isRetryable == true, !isBusy else { return }
+        clearFailure()
+        if session != nil {
+            await resolveOrganizations(preferredID: selectedOrganization?.id)
+            return
+        }
+        // Nothing on disk to restore: the sign-in form itself is the retry.
+        guard hasStoredSession else { return }
+        started = false
+        status = .restoring
+        await start()
+    }
+
     public func signOut() async {
         refreshTask?.cancel()
         refreshTask = nil
@@ -290,6 +332,8 @@ public final class WisentAuthStore: ObservableObject {
         }
         try? persistence.clear()
         session = nil
+        restoredIdentity = nil
+        restoredIdentityPending = false
         organizations = []
         selectedOrganization = nil
         pendingInvitations = []
@@ -297,10 +341,10 @@ public final class WisentAuthStore: ObservableObject {
         organizationInvitations = []
         inviteEmail = ""
         inviteRole = "member"
-        organizationError = nil
+        clearOrganizationFailure()
         email = ""
         code = ""
-        errorMessage = nil
+        clearFailure()
         status = .signedOut
     }
 
@@ -317,8 +361,16 @@ public final class WisentAuthStore: ObservableObject {
             scheduleRefresh(for: refreshed)
             return true
         } catch {
-            errorMessage = "Session expired. Sign in again."
-            await signOut()
+            // signOut() clears the published failure, so the message is
+            // published after it — otherwise the user lands on a bare sign-in
+            // screen with no idea why. And only a rejected token justifies
+            // signing out at all: an unreachable identity service must not
+            // look like an expired session.
+            let refreshFailure = WisentFailureClassifier.report(error, point: .session)
+            if refreshFailure.code == .auth {
+                await signOut()
+            }
+            publish(refreshFailure)
             return false
         }
     }
@@ -326,33 +378,39 @@ public final class WisentAuthStore: ObservableObject {
     private func signInWithOAuth(provider: String, label: String) async {
         guard !isBusy else { return }
         isBusy = true
-        errorMessage = nil
+        isOAuthBusy = true
+        clearFailure()
         defer {
             isBusy = false
+            isOAuthBusy = false
             webSession = nil
         }
         do {
             let pkce = PKCEPair()
             let url = try await client.oauthAuthorizeURL(provider: provider, challenge: pkce.challenge)
-            let session = DesktopWebAuthSession()
+            let session = webSessionFactory()
             webSession = session
             let callback = try await session.start(url: url, callbackScheme: configuration.callbackScheme)
             let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems
             guard let authorizationCode = items?.first(where: { $0.name == "code" })?.value,
                   !authorizationCode.isEmpty else {
                 let providerError = items?.first(where: { $0.name == "error_description" })?.value
-                throw WisentAuthError.http(-1, providerError ?? "\(label) did not return an authorization code.")
+                throw WisentAuthError.oauthRejected(providerError ?? "\(label) returned no authorization code")
             }
             let newSession = try await client.exchangeCode(authorizationCode, verifier: pkce.verifier)
             try await accept(newSession)
+        } catch is CancellationError {
+            return
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
             return
         } catch {
-            errorMessage = Self.describe(error)
+            report(error, point: .oauthCallback)
         }
     }
 
     private func accept(_ newSession: WisentSession) async throws {
+        restoredIdentity = nil
+        restoredIdentityPending = false
         session = newSession
         email = newSession.email
         code = ""
@@ -367,7 +425,7 @@ public final class WisentAuthStore: ObservableObject {
             return
         }
         status = .resolvingOrganization
-        errorMessage = nil
+        clearFailure()
         do {
             let invitations = try await client.pendingInvitations(session: session)
             if !invitations.isEmpty {
@@ -401,7 +459,7 @@ public final class WisentAuthStore: ObservableObject {
                 status = .choosingOrganization
             }
         } catch {
-            errorMessage = "Organization setup failed: \(Self.describe(error))"
+            report(error, point: .organizations)
             status = .signedOut
         }
     }
@@ -413,12 +471,12 @@ public final class WisentAuthStore: ObservableObject {
         guard await ensureFreshSession(),
               let session,
               let organization = selectedOrganization else {
-            organizationError = "Select an organization before managing its team."
+            organizationNote("Select an organization before managing its team.")
             return
         }
 
         isOrganizationBusy = true
-        organizationError = nil
+        clearOrganizationFailure()
         defer { isOrganizationBusy = false }
         do {
             try await operation(session, organization)
@@ -433,19 +491,19 @@ public final class WisentAuthStore: ObservableObject {
             organizationMembers = try await members
             organizationInvitations = try await invitations
         } catch {
-            organizationError = Self.describe(error)
+            reportOrganization(error, point: .organizations)
         }
     }
 
-    private func perform(_ operation: () async throws -> Void) async {
+    private func perform(point: WisentFailurePoint, _ operation: () async throws -> Void) async {
         guard !isBusy else { return }
         isBusy = true
-        errorMessage = nil
+        clearFailure()
         defer { isBusy = false }
         do {
             try await operation()
         } catch {
-            errorMessage = Self.describe(error)
+            report(error, point: point)
         }
     }
 
@@ -464,34 +522,156 @@ public final class WisentAuthStore: ObservableObject {
 
 
 
-    private static func describe(_ error: Error) -> String {
-        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    /// Publishes a dependency failure: the classified sentence for the screen,
+    /// the raw material for the operator log. Nothing technical gets past here.
+    @discardableResult
+    private func report(_ error: Error, point: WisentFailurePoint) -> WisentFailure {
+        let classified = WisentFailureClassifier.report(error, point: point)
+        publish(classified)
+        return classified
+    }
+
+    private func publish(_ classified: WisentFailure) {
+        failure = classified
+        errorMessage = classified.message
+    }
+
+    /// A local input problem, not a dependency failure: nothing to classify,
+    /// nothing worth an operator's attention.
+    private func note(_ message: String) {
+        failure = nil
+        errorMessage = message
+    }
+
+    private func clearFailure() {
+        failure = nil
+        errorMessage = nil
+    }
+
+    @discardableResult
+    private func reportOrganization(_ error: Error, point: WisentFailurePoint) -> WisentFailure {
+        let classified = WisentFailureClassifier.report(error, point: point)
+        organizationFailure = classified
+        organizationError = classified.message
+        return classified
+    }
+
+    private func organizationNote(_ message: String) {
+        organizationFailure = nil
+        organizationError = message
+    }
+
+    private func clearOrganizationFailure() {
+        organizationFailure = nil
+        organizationError = nil
+    }
+
+    /// Which half of the configuration is unusable. Names the field, never its
+    /// value, and only ever reaches the log.
+    private var configurationReason: String {
+        URL(string: configuration.supabaseURL) == nil
+            ? "identity url is missing or not a url"
+            : "anon key is empty"
+    }
+
+    private func publishRestoredIdentityIfReady() {
+        guard restoredIdentityPending,
+              status == .ready,
+              let session,
+              let selectedOrganization else { return }
+        restoredIdentityPending = false
+        restoredIdentity = WisentRestoredIdentity(
+            userID: session.userID,
+            organizationID: selectedOrganization.id,
+            sessionExpiresAt: session.expiresAt,
+            observedAt: Date()
+        )
+    }
+
+    /// True when there is a session on disk worth restoring again.
+    private var hasStoredSession: Bool {
+        ((try? persistence.load()) ?? nil) != nil
     }
 }
 
 @MainActor
-private final class DesktopWebAuthSession: NSObject, ASWebAuthenticationPresentationContextProviding {
+protocol OAuthWebSession: AnyObject {
+    func start(url: URL, callbackScheme: String) async throws -> URL
+    func cancel()
+}
+
+@MainActor
+private final class DesktopWebAuthSession: NSObject, OAuthWebSession,
+    ASWebAuthenticationPresentationContextProviding
+{
+    private let timeout: Duration
     private var session: ASWebAuthenticationSession?
+    private var continuation: CheckedContinuation<URL, Error>?
+    private var timeoutTask: Task<Void, Never>?
+
+    init(timeout: Duration = .seconds(300)) {
+        self.timeout = timeout
+    }
 
     func start(url: URL, callbackScheme: String) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: callbackScheme) { url, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if let url {
-                    continuation.resume(returning: url)
-                } else {
-                    continuation.resume(throwing: WisentAuthError.invalidResponse)
+        guard continuation == nil else { throw WisentAuthError.invalidResponse(.oauthAuthorize) }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                self.continuation = continuation
+                let session = ASWebAuthenticationSession(
+                    url: url,
+                    callbackURLScheme: callbackScheme
+                ) { [weak self] url, error in
+                    Task { @MainActor in
+                        if let error {
+                            self?.finish(.failure(error))
+                        } else if let url {
+                            self?.finish(.success(url))
+                        } else {
+                            self?.finish(.failure(WisentAuthError.invalidResponse(.oauthAuthorize)))
+                        }
+                    }
+                }
+                session.presentationContextProvider = self
+                session.prefersEphemeralWebBrowserSession = false
+                self.session = session
+                guard session.start() else {
+                    finish(.failure(WisentAuthError.invalidResponse(.oauthAuthorize)))
+                    return
+                }
+                timeoutTask = Task { @MainActor [weak self, timeout] in
+                    do {
+                        try await Task.sleep(for: timeout)
+                    } catch {
+                        return
+                    }
+                    self?.cancel(with: WisentAuthError.webAuthenticationTimedOut)
                 }
             }
-            session.presentationContextProvider = self
-            session.prefersEphemeralWebBrowserSession = false
-            self.session = session
-            guard session.start() else {
-                continuation.resume(throwing: WisentAuthError.invalidResponse)
-                return
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.cancel()
             }
         }
+    }
+
+    func cancel() {
+        cancel(with: CancellationError())
+    }
+
+    private func cancel(with error: Error) {
+        guard continuation != nil else { return }
+        session?.cancel()
+        finish(.failure(error))
+    }
+
+    private func finish(_ result: Result<URL, Error>) {
+        guard let continuation else { return }
+        self.continuation = nil
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        session = nil
+        continuation.resume(with: result)
     }
 
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
