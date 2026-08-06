@@ -147,6 +147,55 @@ jobs:
         # happened.
         run: python3 scripts/surface.py > "$RUNNER_TEMP/candidate.json"
 
+      - name: Prove this gate can still refuse
+        run: |
+          set -euo pipefail
+          # A gate that has never refused is decoration, and the install step's
+          # two-answer probe does not retire this one. That probe ran under its
+          # own in-step `export PATH`, pointed at the venv it had just built.
+          # Every step from here down resolves `autoversion` through
+          # GITHUB_PATH instead, which is a DIFFERENT resolution and takes
+          # effect only from the next step onwards. So the arm that proved the
+          # rule can say `breaking` and the arm that consumes the verdict below
+          # have never yet been the same binary: drop the GITHUB_PATH line, or
+          # let a stranger's `autoversion` sit earlier on the runner's PATH, and
+          # the install step stays green while every verdict after it comes from
+          # somebody else. And a stranger answering a constant `internal` is
+          # invisible to the comparison below, because with no new tag on this
+          # revision `internal` IS the passing branch.
+          #
+          # This step closes that gap by demanding a refusal from whatever
+          # answers HERE, one step before the verdict is consumed and through the
+          # same PATH that consumes it. It is not the install probe repeated; it
+          # is that probe carried across the step boundary the install step
+          # cannot cross.
+          #
+          # Built from the COMMITTED baseline rather than a synthetic pair, so it
+          # also proves the frozen file parses and is really what reaches the
+          # decision. `- [first]` drops one name without a bare subscript, which
+          # this workspace refuses to let anyone write. One name, never all of
+          # them: the rule rejects an empty candidate outright as a far more
+          # likely broken extractor, so an empty surface is no use as the
+          # breaking case.
+          released="$(jq -r .version released-surface.json)"
+          jq '{surface: (.surface - [(.surface | sort | first)])}' \
+            released-surface.json > "$RUNNER_TEMP/refusal-probe.json"
+          dropped="$(jq -r '.surface | sort | first' released-surface.json)"
+          verdict="$(autoversion decide --current "$released" \
+            --published-surface released-surface.json \
+            --candidate-surface "$RUNNER_TEMP/refusal-probe.json" --json \
+            | jq -r .change)"
+          if [ "$verdict" != breaking ]; then
+            echo "::error::removing $dropped from the released contract of" \
+              "$released yielded '${verdict:-<nothing>}' instead of breaking," \
+              "answered by the \`autoversion\` at" \
+              "'$(command -v autoversion || echo nothing)'. This gate cannot" \
+              "refuse a removal, so the comparison below can only ever pass and" \
+              "its pass is worthless. Fix the check; do not trust it."
+            false
+          fi
+          echo "Dropping $dropped is refused as breaking, so this gate can refuse."
+
       - name: Compare against the released contract
         run: |
           set -euo pipefail
