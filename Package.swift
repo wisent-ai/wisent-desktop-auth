@@ -10,7 +10,7 @@ let package = Package(
         .executable(name: "wisent-auth-onboarding-host", targets: ["WisentAuthOnboardingHost"]),
     ],
     dependencies: [
-        .package(path: "../echo-web"),
+        .package(path: "../echo"),
     ],
     targets: [
         .target(
@@ -21,7 +21,7 @@ let package = Package(
             name: "WisentAuthOnboarding",
             dependencies: [
                 "WisentAuth",
-                .product(name: "WisentOnboarding", package: "echo-web"),
+                .product(name: "WisentOnboarding", package: "echo"),
             ],
             path: "Sources/WisentOnboarding",
             resources: [.process("Resources")]
@@ -31,7 +31,7 @@ let package = Package(
             dependencies: [
                 "WisentAuth",
                 "WisentAuthOnboarding",
-                .product(name: "WisentOnboarding", package: "echo-web"),
+                .product(name: "WisentOnboarding", package: "echo"),
             ],
             path: "Sources/WisentAuthOnboardingHost"
         ),
