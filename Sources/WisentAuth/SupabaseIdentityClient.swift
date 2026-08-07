@@ -271,9 +271,18 @@ actor SupabaseIdentityClient {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw WisentAuthError.invalidResponse }
+        let point = WisentFailurePoint.forRequest(path: path)
+        guard let http = response as? HTTPURLResponse else { throw WisentAuthError.invalidResponse(point) }
         guard (200...299).contains(http.statusCode) else {
-            throw WisentAuthError.http(http.statusCode, String(decoding: data, as: UTF8.self))
+            throw WisentAuthError.http(
+                WisentUpstreamResponse(
+                    status: http.statusCode,
+                    body: String(decoding: data, as: UTF8.self),
+                    headerCode: http.value(forHTTPHeaderField: WisentFailureHeader.code),
+                    headerImpact: http.value(forHTTPHeaderField: WisentFailureHeader.impact)
+                ),
+                point
+            )
         }
         return data
     }

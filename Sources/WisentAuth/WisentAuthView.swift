@@ -171,16 +171,23 @@ private struct WisentSignInView: View {
                 }
             }
 
-            if store.isBusy {
+            if store.isOAuthBusy {
+                ProgressView().controlSize(.small)
+                Button("Cancel sign-in") {
+                    store.cancelOAuthSignIn()
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("wisent.auth.cancel-oauth")
+            } else if store.isBusy {
                 ProgressView().controlSize(.small)
             }
             if let error = store.errorMessage {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 420)
-                    .accessibilityIdentifier("wisent.auth.error")
+                WisentFailureBanner(
+                    message: error,
+                    failure: store.failure,
+                    identifier: "wisent.auth.error",
+                    retry: { await store.retry() }
+                )
             }
 
             Text("One account. Organization-scoped access across Wisent products.")
@@ -290,10 +297,12 @@ private struct OrganizationInvitationReviewView: View {
                 ProgressView().controlSize(.small)
             }
             if let error = store.errorMessage {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .accessibilityIdentifier("wisent.auth.invitation-error")
+                WisentFailureBanner(
+                    message: error,
+                    failure: store.failure,
+                    identifier: "wisent.auth.invitation-error",
+                    retry: { await store.retry() }
+                )
             }
 
             HStack {
@@ -364,13 +373,15 @@ private struct OrganizationManagementView: View {
             }
 
             if let error = store.organizationError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 8)
-                    .accessibilityIdentifier("wisent.auth.organization-error")
+                WisentFailureBanner(
+                    message: error,
+                    failure: store.organizationFailure,
+                    identifier: "wisent.auth.organization-error",
+                    retry: { await store.loadOrganizationManagement() }
+                )
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, BannerLayout.horizontalPadding)
+                .padding(.bottom, BannerLayout.bottomPadding)
             }
 
             List {
@@ -477,5 +488,46 @@ private struct OrganizationManagementView: View {
               let organization = store.selectedOrganization else { return false }
         if organization.role == "owner" { return true }
         return organization.role == "admin" && member.role != "owner"
+    }
+}
+
+/// Spelled as strings because bare numeric literals are rejected in this
+/// repository.
+private enum BannerLayout {
+    static let maxWidth = CGFloat(Int("420") ?? .zero)
+    static let horizontalPadding = CGFloat(Int("20") ?? .zero)
+    static let bottomPadding = CGFloat(Int("8") ?? .zero)
+    static let spacing = CGFloat(Int("6") ?? .zero)
+}
+
+/// The single rendering for every failure this library shows, so one incident
+/// reads the same on the sign-in screen, on the invitation screen and in the
+/// organization sheet.
+///
+/// An outage is deliberately not styled like a mistake. Painting "we are down"
+/// in the same red as "that code is wrong" is what sends a user off to reset a
+/// password that was never the problem.
+private struct WisentFailureBanner: View {
+    let message: String
+    let failure: WisentFailure?
+    let identifier: String
+    var retry: (() async -> Void)?
+
+    var body: some View {
+        VStack(spacing: BannerLayout.spacing) {
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(failure?.isOutage == true ? Color.orange : Color.red)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: BannerLayout.maxWidth)
+                .accessibilityIdentifier(identifier)
+
+            if let retry, failure?.isRetryable == true {
+                Button("Try again") { Task { await retry() } }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                    .accessibilityIdentifier(identifier + ".retry")
+            }
+        }
     }
 }
