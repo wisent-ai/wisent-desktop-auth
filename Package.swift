@@ -10,7 +10,11 @@ let package = Package(
         .executable(name: "wisent-auth-onboarding-host", targets: ["WisentAuthOnboardingHost"]),
     ],
     dependencies: [
-        .package(path: "../echo"),
+        // Consumed by URL, not by sibling path: a path dependency inside a
+        // package that others resolve by version can never be found in their
+        // .build/checkouts, which silently downgraded every consumer to the
+        // last tag that predated this dependency.
+        .package(url: "https://github.com/wisent-ai/echo.git", from: "0.1.2"),
     ],
     targets: [
         .target(
