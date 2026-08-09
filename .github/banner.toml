@@ -1,0 +1,15 @@
+[automation]
+managed = true
+source_fingerprint = "613cf07ebe234f41"
+category = "developer"
+
+[banner]
+title = "One secure identity layer for Wisent macOS apps."
+description = "Swift package for Supabase sign-in, organizations, entitlements, sessions, and Keychain storage."
+product = "Wisent"
+url = "wisent.ai"
+theme = "dark"
+layout = "signal-left"
+art_seed = "wisent-desktop-auth"
+width = 1584
+height = 396
