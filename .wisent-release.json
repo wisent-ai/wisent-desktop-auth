@@ -13,11 +13,19 @@
       "quality": [
         {
           "name": "compile",
-          "argv": ["bash", "release/build.sh", "compile"]
+          "argv": [
+            "bash",
+            "release/build.sh",
+            "compile"
+          ]
         }
       ],
       "build": {
-        "argv": ["bash", "release/build.sh", "build"]
+        "argv": [
+          "bash",
+          "release/build.sh",
+          "build"
+        ]
       },
       "stage": {
         "dist/wisent-auth-onboarding-host": "bin/wisent-auth-onboarding-host",
@@ -34,16 +42,11 @@
       "mount": "echo.tar.gz"
     }
   },
-  "runtime": {
-    "binary": "bin/wisent-auth-onboarding-host",
-    "launcher": "bin/wisent-auth-onboarding-host",
-    "config_schema": 1,
-    "state_schema": 1,
-    "minimum_stado_version": "0.6.1",
-    "rollback_compatible_with": []
-  },
   "promotion": {
-    "channels": ["candidate", "stable"],
+    "channels": [
+      "candidate",
+      "stable"
+    ],
     "reconcile": false
   }
 }
