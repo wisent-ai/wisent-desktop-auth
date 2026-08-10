@@ -39,7 +39,8 @@
     "echo": {
       "uri": "stado://sources/echo/sha256/b086ee88ca870556f738589dd5548efea515bcc4f4831fa2d36cba93465113ba/source.tar.gz",
       "sha256": "b086ee88ca870556f738589dd5548efea515bcc4f4831fa2d36cba93465113ba",
-      "mount": "echo.tar.gz"
+      "mount": "echo.tar.gz",
+      "extract": false
     }
   },
   "promotion": {
