@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "product": "wisent-desktop-auth",
+  "releases": true,
+  "version_source": {
+    "kind": "json",
+    "path": "released-surface.json",
+    "pointer": "/version"
+  },
+  "platforms": {
+    "darwin-arm64": {
+      "runner_platform": "darwin-arm64",
+      "quality": [
+        {
+          "name": "compile",
+          "argv": [
+            "bash",
+            "release/build.sh",
+            "compile"
+          ]
+        }
+      ],
+      "build": {
+        "argv": [
+          "bash",
+          "release/build.sh",
+          "build"
+        ]
+      },
+      "stage": {
+        "dist/wisent-auth-onboarding-host": "bin/wisent-auth-onboarding-host",
+        "dist/wisent-desktop-auth-source.tar.gz": "source/wisent-desktop-auth-source.tar.gz",
+        "dist/SOURCE_REVISION": "SOURCE_REVISION",
+        "dist/build-evidence.json": "evidence/build-evidence.json"
+      }
+    }
+  },
+  "inputs": {
+    "echo": {
+      "uri": "stado://sources/echo/sha256/b086ee88ca870556f738589dd5548efea515bcc4f4831fa2d36cba93465113ba/source.tar.gz",
+      "sha256": "b086ee88ca870556f738589dd5548efea515bcc4f4831fa2d36cba93465113ba",
+      "mount": "echo.tar.gz",
+      "extract": false
+    }
+  },
+  "promotion": {
+    "channels": [
+      "candidate",
+      "stable"
+    ],
+    "reconcile": false
+  }
+}
