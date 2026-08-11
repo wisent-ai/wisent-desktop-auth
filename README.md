@@ -10,10 +10,16 @@
 
 # Wisent Desktop Auth
 
-**Wisent Desktop Auth is a shared native Swift package that gives Wisent macOS
-applications one Supabase-backed sign-in, organization-selection, member
-management, session-refresh, failure-classification, and Keychain persistence
-boundary.**
+One Sign-In for Every Wisent App on Your Mac.
+
+Ten desktop applications means ten login screens, ten Keychain bugs and ten
+different ways a session dies on a Monday morning. Wisent Desktop Auth is the one
+Swift package they all share: sign-in, organization selection, member management,
+session refresh and the Keychain persistence underneath. Failures come back
+classified, so an app can tell an expired session from a network problem from a
+revoked seat. Add the package and the login screen is already finished.
+
+Sign In Once. Everywhere.
 
 It authenticates a person and exposes selected organization identity to a host
 application. It does not decide product authorization, entitlements, billing,
