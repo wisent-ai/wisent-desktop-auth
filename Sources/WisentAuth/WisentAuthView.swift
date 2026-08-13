@@ -1,4 +1,5 @@
 import SwiftUI
+import WisentDesignSystem
 
 private struct WisentIdentityEnvironmentKey: EnvironmentKey {
     static let defaultValue: WisentIdentity? = nil
@@ -110,93 +111,141 @@ private struct WisentSignInView: View {
     @ObservedObject var store: WisentAuthStore
 
     var body: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "person.badge.shield.checkmark.fill")
-                .font(.system(size: 46, weight: .medium))
-                .foregroundStyle(.green)
-                .accessibilityHidden(true)
-            Text(store.productName)
-                .font(.system(size: 32, weight: .bold, design: .rounded))
-            Text("Sign in with your Wisent account")
-                .foregroundStyle(.secondary)
+        ZStack {
+            WisentCanvasBackground()
 
-            if store.status == .waitingForCode {
-                Text("Enter the code sent to \(store.email)")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                TextField("123456", text: $store.code)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 280)
-                    .accessibilityIdentifier("wisent.auth.code")
-                    .onSubmit { Task { await store.verifyCode() } }
+            WisentPanel {
+                VStack(alignment: .leading, spacing: WisentDesign.Space.x5) {
+                    WisentPageHeader(
+                        eyebrow: "Wisent account",
+                        title: store.productName,
+                        detail: "Sign in once for organization-scoped access across Wisent products.",
+                        symbol: "person.badge.shield.checkmark.fill",
+                        tone: .success
+                    )
+
+                    if store.status == .waitingForCode {
+                        codeForm
+                    } else {
+                        emailForm
+                    }
+
+                    activity
+
+                    if let error = store.errorMessage {
+                        WisentFailureBanner(
+                            message: error,
+                            failure: store.failure,
+                            identifier: "wisent.auth.error",
+                            retry: { await store.retry() }
+                        )
+                    }
+
+                    HStack(spacing: WisentDesign.Space.x2) {
+                        Image(systemName: "building.2")
+                        Text("Organization membership determines product access.")
+                    }
+                    .font(WisentTypography.body(11))
+                    .foregroundStyle(WisentDesign.muted)
+                }
+            }
+            .frame(maxWidth: 480)
+            .padding(WisentDesign.Space.x8)
+        }
+        .frame(minWidth: 560, minHeight: 480)
+        .accessibilityIdentifier("wisent.auth.screen")
+    }
+
+    private var codeForm: some View {
+        VStack(alignment: .leading, spacing: WisentDesign.Space.x3) {
+            WisentSectionHeader(
+                "Verify your email",
+                detail: "Enter the one-time code sent to \(store.email)."
+            )
+            TextField("123456", text: $store.code)
+                .textFieldStyle(.roundedBorder)
+                .font(WisentTypography.monoMedium(15))
+                .accessibilityIdentifier("wisent.auth.code")
+                .onSubmit { Task { await store.verifyCode() } }
+            HStack(spacing: WisentDesign.Space.x3) {
                 Button("Verify code") {
                     Task { await store.verifyCode() }
                 }
                 .keyboardShortcut(.return)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(WisentPrimaryButtonStyle())
                 .disabled(store.isBusy)
-                Button("Use a different email") { store.changeEmail() }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-            } else {
-                TextField("you@company.com", text: $store.email)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 280)
-                    .accessibilityIdentifier("wisent.auth.email")
-                    .onSubmit { Task { await store.sendCode() } }
-                Button("Send one-time code") {
-                    Task { await store.sendCode() }
+                Button("Use a different email") {
+                    store.changeEmail()
                 }
-                .keyboardShortcut(.return)
-                .buttonStyle(.borderedProminent)
-                .disabled(store.isBusy)
-
-                if store.oauthEnabled {
-                    HStack(spacing: 8) {
-                        Rectangle().fill(.secondary.opacity(0.25)).frame(height: 1)
-                        Text("or").font(.caption).foregroundStyle(.secondary)
-                        Rectangle().fill(.secondary.opacity(0.25)).frame(height: 1)
-                    }
-                    .frame(width: 280)
-
-                    HStack(spacing: 10) {
-                        Button("Continue with Google") {
-                            Task { await store.signInWithGoogle() }
-                        }
-                        Button("Continue with GitHub") {
-                            Task { await store.signInWithGitHub() }
-                        }
-                    }
-                    .disabled(store.isBusy)
-                }
+                .buttonStyle(WisentSecondaryButtonStyle())
             }
+        }
+    }
 
-            if store.isOAuthBusy {
-                ProgressView().controlSize(.small)
-                Button("Cancel sign-in") {
+    private var emailForm: some View {
+        VStack(alignment: .leading, spacing: WisentDesign.Space.x3) {
+            WisentSectionHeader(
+                "Continue with email",
+                detail: "We will send a short-lived sign-in code."
+            )
+            TextField("you@company.com", text: $store.email)
+                .textFieldStyle(.roundedBorder)
+                .font(WisentTypography.body(14))
+                .accessibilityIdentifier("wisent.auth.email")
+                .onSubmit { Task { await store.sendCode() } }
+            Button("Send one-time code") {
+                Task { await store.sendCode() }
+            }
+            .keyboardShortcut(.return)
+            .buttonStyle(WisentPrimaryButtonStyle())
+            .disabled(store.isBusy)
+
+            if store.oauthEnabled {
+                HStack(spacing: WisentDesign.Space.x2) {
+                    Rectangle()
+                        .fill(WisentDesign.border)
+                        .frame(height: WisentDesign.hairline)
+                    Text("OR")
+                        .font(WisentTypography.monoMedium(10))
+                        .foregroundStyle(WisentDesign.muted)
+                    Rectangle()
+                        .fill(WisentDesign.border)
+                        .frame(height: WisentDesign.hairline)
+                }
+                HStack(spacing: WisentDesign.Space.x3) {
+                    WisentOAuthButton(.google) {
+                        Task { await store.signInWithGoogle() }
+                    }
+                    WisentOAuthButton(.github) {
+                        Task { await store.signInWithGitHub() }
+                    }
+                }
+                .disabled(store.isBusy)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var activity: some View {
+        if store.isOAuthBusy {
+            HStack(spacing: WisentDesign.Space.x3) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Completing secure sign-in…")
+                    .font(WisentTypography.body(12))
+                    .foregroundStyle(WisentDesign.secondary)
+                Spacer()
+                Button("Cancel") {
                     store.cancelOAuthSignIn()
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("wisent.auth.cancel-oauth")
-            } else if store.isBusy {
-                ProgressView().controlSize(.small)
             }
-            if let error = store.errorMessage {
-                WisentFailureBanner(
-                    message: error,
-                    failure: store.failure,
-                    identifier: "wisent.auth.error",
-                    retry: { await store.retry() }
-                )
-            }
-
-            Text("One account. Organization-scoped access across Wisent products.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+        } else if store.isBusy {
+            ProgressView()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(48)
-        .frame(minWidth: 560, minHeight: 480)
-        .accessibilityIdentifier("wisent.auth.screen")
     }
 }
 
