@@ -54,12 +54,12 @@ public struct WisentAuthFirstUseResult: Codable, Equatable, Sendable {
 /// journey.
 @MainActor
 public final class WisentAuthFirstUseAdapter: ObservableObject {
-    public static let productId = "wisent-desktop-auth"
-    public static let journeyId = "first-use"
-    public static let journeyVersion = "2026-08-04.1"
-    public static let journeyVersionId = UUID(uuidString: "12000000-0000-4000-8000-000000000011")!
-    public static let sourceRevision = "wisent-desktop-auth-first-use-2026-08-04"
-    public static let firstSuccessFact = "authenticated_identity_restored"
+    nonisolated public static let productId = "wisent-desktop-auth"
+    nonisolated public static let journeyId = "first-use"
+    nonisolated public static let journeyVersion = "2026-08-04.1"
+    nonisolated public static let journeyVersionId = UUID(uuidString: "12000000-0000-4000-8000-000000000011")!
+    nonisolated public static let sourceRevision = "wisent-desktop-auth-first-use-2026-08-04"
+    nonisolated public static let firstSuccessFact = "authenticated_identity_restored"
 
     @Published public private(set) var currentScreen: JourneyScreen?
     @Published public private(set) var attemptId: UUID?

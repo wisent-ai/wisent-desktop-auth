@@ -15,7 +15,7 @@ let package = Package(
         // .build/checkouts, which silently downgraded every consumer to the
         // last tag that predated this dependency.
         .package(url: "https://github.com/wisent-ai/echo.git", from: "0.1.2"),
-        .package(url: "https://github.com/wisent-ai/wisent-components.git", revision: "69a299f"),
+        .package(url: "https://github.com/wisent-ai/wisent-components.git", revision: "3b6e507"),
     ],
     targets: [
         .target(
