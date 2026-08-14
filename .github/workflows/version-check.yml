@@ -46,6 +46,10 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # pull_request checks out a synthetic merge commit by default. A release
+          # tag can only point at the candidate commit, so inspect that commit.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       # actions/checkout fetches one commit and no tags. Every step below reads
       # git refs: the declared version *is* a tag, the baseline is recovered with
