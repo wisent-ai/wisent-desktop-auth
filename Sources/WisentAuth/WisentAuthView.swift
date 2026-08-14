@@ -2,6 +2,26 @@ import AppKit
 import SwiftUI
 import WisentDesignSystem
 
+private enum WisentAuthResources {
+    static let bundle: Bundle = {
+        let bundleName = "WisentDesktopAuth_WisentAuth.bundle"
+        let candidates = [
+            Bundle.main.resourceURL?.appendingPathComponent(bundleName, isDirectory: true),
+            Bundle.main.bundleURL.appendingPathComponent(bundleName, isDirectory: true),
+        ]
+        for case let url? in candidates {
+            if let bundle = Bundle(url: url) {
+                return bundle
+            }
+        }
+        #if SWIFT_PACKAGE
+        return Bundle.module
+        #else
+        preconditionFailure("Missing WisentAuth resource bundle")
+        #endif
+    }()
+}
+
 private struct WisentIdentityEnvironmentKey: EnvironmentKey {
     static let defaultValue: WisentIdentity? = nil
 }
@@ -320,7 +340,7 @@ private struct WisentSignInView: View {
     }
 
     private var heroImage: Image {
-        guard let url = Bundle.module.url(
+        guard let url = WisentAuthResources.bundle.url(
             forResource: "signin-background",
             withExtension: "jpg"
         ), let image = NSImage(contentsOf: url) else {
