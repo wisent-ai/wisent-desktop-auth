@@ -46,6 +46,10 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # pull_request checks out a synthetic merge commit by default. A release
+          # tag can only point at the candidate commit, so inspect that commit.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       # actions/checkout fetches one commit and no tags. Every step below reads
       # git refs: the declared version *is* a tag, the baseline is recovered with
@@ -270,12 +274,14 @@ jobs:
           # Read the *content* of each answer, never a client's exit status.
           # `git ls-remote` failing on no egress and a repository genuinely
           # holding no tags are indistinguishable by exit code, and the wrong
-          # reading is the passing one. Likewise the releases count is asked as a
-          # word -- some, none, or empty for "did not answer" -- so that silence
-          # can never be read as absence.
+          # reading is the passing one. Likewise the package-release count is
+          # asked as a word -- some, none, or empty for "did not answer" -- so
+          # silence can never be read as absence. Non-version releases document
+          # other contracts and cannot supersede a SwiftPM package tag.
           remote_tags="$(git ls-remote --tags origin || true)"
           any_entries='if (length > ([] | length)) then "some" else "none" end'
-          releases="$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq "$any_entries" || true)"
+          version_entries='[.[] | select(.draft | not) | .tag_name | select(test("^v?[[:digit:]]+(\\.[[:digit:]]+)*$"))] | if (length > ([] | length)) then "some" else "none" end'
+          releases="$(gh api "repos/$GITHUB_REPOSITORY/releases" --jq "$version_entries" || true)"
 
           # Fail-closed twin, pointed at the positive branch, on a subject THIS
           # job's own credential can reach. "Unproven" is also what a broken
@@ -293,8 +299,9 @@ jobs:
           # exactly what a sleeping one is worth. A control that needs wider
           # access than the subject is not a control; it is a second subject.
           #
-          # This repository serves no releases at all -- that is precisely why its
-          # tier is a tag -- so it cannot control the releases probe on itself.
+          # This repository serves no versioned package releases at all -- that
+          # is precisely why its tier is a tag -- so it cannot control the
+          # package-release probe on itself.
           # What it can demand is everything that probe depends on and shares: the
           # same host, the same client, the same credential, the same jq spelling,
           # under this repository's own slug. Two demands, and each catches what

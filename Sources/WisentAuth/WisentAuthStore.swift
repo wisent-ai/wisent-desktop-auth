@@ -40,6 +40,8 @@ public final class WisentAuthStore: ObservableObject {
     @Published public private(set) var organizationFailure: WisentFailure?
 
     public let productName: String
+    /// Nonprompting host diagnostics captured before the first Keychain access.
+    @Published public private(set) var permissionReport: WisentPermissionReport?
     public var oauthEnabled: Bool { configuration.oauthEnabled }
 
     private let configuration: WisentAuthConfiguration
@@ -92,6 +94,9 @@ public final class WisentAuthStore: ObservableObject {
     public func start() async {
         guard !started else { return }
         started = true
+        permissionReport = await WisentPermissionCenter.report(
+            required: [.sharedIdentityKeychain]
+        )
         guard configuration.isConfigured else {
             report(WisentAuthError.notConfigured(configurationReason), point: .configuration)
             status = .signedOut

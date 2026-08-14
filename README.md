@@ -56,6 +56,8 @@ Wisent Desktop Auth serves:
 ### Included
 
 - `WisentAuth` Swift library product for macOS 14+;
+- `WisentPermissionCenter`, a read-only permission-status API that never
+  triggers a macOS consent dialog;
 - reusable `WisentAuthGate` SwiftUI view and account/organization UI;
 - `WisentAuthStore` observable state machine;
 - email one-time-code request and verification;
@@ -63,7 +65,8 @@ Wisent Desktop Auth serves:
 - session restoration, refresh before expiry, and sign-out;
 - organization discovery/bootstrap, invitation review, and selection;
 - member/invitation listing plus owner/admin management operations;
-- access and refresh token persistence in macOS Keychain;
+- shared access and refresh token persistence in macOS Keychain, with one-time
+  migration from each host's former bundle-scoped session;
 - classified user-safe failures and separately logged operator diagnostics.
 
 ### Explicit non-goals and limitations
@@ -293,8 +296,10 @@ the classified failure rather than parsing text in `errorMessage`.
 
 ## Security and privacy
 
-- Access and refresh tokens are saved as a generic Keychain item scoped by bundle
-  identifier, with `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`.
+- Access and refresh tokens are saved as one generic Keychain item in the
+  signed `LNTWB5B9DV.ai.wisent.identity` access group, with
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`; an app without that
+  entitlement remains bundle-scoped and cannot read the shared item.
 - Keychain storage protects persistence; it does not prevent a compromised host
   process from reading the public in-memory identity/access token.
 - The default session begins refresh five minutes before expiry. Servers must
@@ -307,10 +312,12 @@ the classified failure rather than parsing text in `errorMessage`.
   headers. Restrict operator logs and retention.
 - Supabase RLS and RPC authorization must fail closed. UI role checks and selected
   organization IDs are attacker-controlled client input.
-- Use a unique stable bundle identifier per application when Keychain separation
-  is required.
-- Sign and notarize production hosts and review their app sandbox/network/keychain
-  entitlements independently of this package.
+- Share only the user's Wisent identity session. Provider, workload, browser,
+  payment, and customer-resource credentials remain outside the shared access
+  group and under their owning product or Skarbiec boundary.
+- Production hosts must be signed by the Wisent team and carry the shared
+  Keychain entitlement. Ad-hoc previews intentionally fall back to isolated,
+  bundle-scoped storage.
 
 ## Operational model
 
