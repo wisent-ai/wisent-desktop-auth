@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .library(name: "WisentAuth", targets: ["WisentAuth"]),
+        .library(name: "WisentPermissions", targets: ["WisentPermissions"]),
         .library(name: "WisentAuthOnboarding", targets: ["WisentAuthOnboarding"]),
         .executable(name: "wisent-auth-onboarding-host", targets: ["WisentAuthOnboardingHost"]),
     ],
@@ -24,6 +25,15 @@ let package = Package(
                 .product(name: "WisentDesignSystem", package: "wisent-components"),
             ],
             linkerSettings: [.linkedFramework("Security")]
+        ),
+        .target(
+            name: "WisentPermissions",
+            linkerSettings: [
+                .linkedFramework("ApplicationServices"),
+                .linkedFramework("AVFoundation"),
+                .linkedFramework("Security"),
+                .linkedFramework("UserNotifications"),
+            ]
         ),
         .target(
             name: "WisentAuthOnboarding",
