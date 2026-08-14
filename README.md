@@ -56,8 +56,8 @@ Wisent Desktop Auth serves:
 ### Included
 
 - `WisentAuth` Swift library product for macOS 14+;
-- `WisentPermissions`, a read-only permission-status API that never triggers a
-  macOS consent dialog;
+- `WisentPermissionCenter`, a read-only permission-status API that never
+  triggers a macOS consent dialog;
 - reusable `WisentAuthGate` SwiftUI view and account/organization UI;
 - `WisentAuthStore` observable state machine;
 - email one-time-code request and verification;
