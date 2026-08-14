@@ -41,7 +41,7 @@ public final class WisentAuthStore: ObservableObject {
 
     public let productName: String
     /// Nonprompting host diagnostics captured before the first Keychain access.
-    public let permissionReport: WisentPermissionReport
+    @Published public private(set) var permissionReport: WisentPermissionReport?
     public var oauthEnabled: Bool { configuration.oauthEnabled }
 
     private let configuration: WisentAuthConfiguration
@@ -71,7 +71,6 @@ public final class WisentAuthStore: ObservableObject {
         webSessionFactory: (@MainActor () -> any OAuthWebSession)? = nil
     ) {
         self.productName = productName
-        permissionReport = WisentPermissionCenter.report(required: [.sharedIdentityKeychain])
         self.configuration = configuration
         client = SupabaseIdentityClient(configuration: configuration)
         self.persistence = persistence ?? KeychainIdentityStore(bundleIdentifier: bundleIdentifier)
@@ -95,6 +94,9 @@ public final class WisentAuthStore: ObservableObject {
     public func start() async {
         guard !started else { return }
         started = true
+        permissionReport = await WisentPermissionCenter.report(
+            required: [.sharedIdentityKeychain]
+        )
         guard configuration.isConfigured else {
             report(WisentAuthError.notConfigured(configurationReason), point: .configuration)
             status = .signedOut
