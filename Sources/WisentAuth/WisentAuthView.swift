@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import WisentDesignSystem
 
@@ -111,49 +112,86 @@ private struct WisentSignInView: View {
     @ObservedObject var store: WisentAuthStore
 
     var body: some View {
-        ZStack {
-            WisentCanvasBackground()
+        GeometryReader { proxy in
+            ZStack {
+                WisentCanvasBackground()
 
-            WisentPanel {
-                VStack(alignment: .leading, spacing: WisentDesign.Space.x5) {
-                    WisentPageHeader(
-                        eyebrow: "Wisent account",
-                        title: store.productName,
-                        detail: "Sign in once for organization-scoped access across Wisent products.",
-                        symbol: "person.badge.shield.checkmark.fill",
-                        tone: .success
-                    )
+                HStack(spacing: WisentDesign.Space.x6) {
+                    signInColumn
+                        .frame(width: min(400, max(360, proxy.size.width * 0.42)))
+                        .frame(maxHeight: .infinity)
 
-                    if store.status == .waitingForCode {
-                        codeForm
-                    } else {
-                        emailForm
+                    if proxy.size.width >= 900 {
+                        brandPanel
+                            .transition(.opacity)
                     }
-
-                    activity
-
-                    if let error = store.errorMessage {
-                        WisentFailureBanner(
-                            message: error,
-                            failure: store.failure,
-                            identifier: "wisent.auth.error",
-                            retry: { await store.retry() }
-                        )
-                    }
-
-                    HStack(spacing: WisentDesign.Space.x2) {
-                        Image(systemName: "building.2")
-                        Text("Organization membership determines product access.")
-                    }
-                    .font(WisentTypography.body(11))
-                    .foregroundStyle(WisentDesign.muted)
                 }
+                .padding(WisentDesign.Space.x6)
             }
-            .frame(maxWidth: 480)
-            .padding(WisentDesign.Space.x8)
         }
-        .frame(minWidth: 560, minHeight: 480)
+        .frame(minWidth: 680, minHeight: 640)
         .accessibilityIdentifier("wisent.auth.screen")
+    }
+
+    private var signInColumn: some View {
+        VStack(spacing: WisentDesign.Space.x6) {
+            VStack(spacing: WisentDesign.Space.x3) {
+                Image(systemName: "person.badge.shield.checkmark.fill")
+                    .font(.system(size: 27, weight: .semibold))
+                    .foregroundStyle(WisentDesign.brandStrong)
+                    .frame(width: 64, height: 64)
+                    .background(WisentDesign.brandSoft, in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(WisentDesign.brand.opacity(0.24), lineWidth: WisentDesign.hairline)
+                    }
+
+                VStack(spacing: WisentDesign.Space.x2) {
+                    Text("Welcome to Wisent")
+                        .font(WisentTypography.display(30))
+                        .foregroundStyle(WisentDesign.ink)
+                    Text("Sign in to \(store.productName) with your Wisent account.")
+                        .font(WisentTypography.body(15))
+                        .foregroundStyle(WisentDesign.secondary)
+                }
+                .multilineTextAlignment(.center)
+
+                WisentBadge(
+                    store.productName,
+                    symbol: "lock.shield.fill",
+                    tone: .brand
+                )
+            }
+
+            VStack(alignment: .leading, spacing: WisentDesign.Space.x4) {
+                if store.status == .waitingForCode {
+                    codeForm
+                } else {
+                    emailForm
+                }
+
+                activity
+
+                if let error = store.errorMessage {
+                    WisentFailureBanner(
+                        message: error,
+                        failure: store.failure,
+                        identifier: "wisent.auth.error",
+                        retry: { await store.retry() }
+                    )
+                }
+
+                Label(
+                    "Organization membership determines product access.",
+                    systemImage: "building.2"
+                )
+                .font(WisentTypography.body(11))
+                .foregroundStyle(WisentDesign.muted)
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+        .frame(maxWidth: 400)
+        .padding(.horizontal, WisentDesign.Space.x4)
     }
 
     private var codeForm: some View {
@@ -167,34 +205,56 @@ private struct WisentSignInView: View {
                 .font(WisentTypography.monoMedium(15))
                 .accessibilityIdentifier("wisent.auth.code")
                 .onSubmit { Task { await store.verifyCode() } }
-            HStack(spacing: WisentDesign.Space.x3) {
-                Button("Verify code") {
-                    Task { await store.verifyCode() }
+            Button {
+                Task { await store.verifyCode() }
+            } label: {
+                HStack {
+                    Text("Continue")
+                    Spacer()
+                    Image(systemName: "arrow.right")
+                        .frame(width: 24, height: 24)
+                        .background(WisentDesign.surface, in: RoundedRectangle(cornerRadius: 6))
                 }
-                .keyboardShortcut(.return)
-                .buttonStyle(WisentPrimaryButtonStyle())
-                .disabled(store.isBusy)
-                Button("Use a different email") {
-                    store.changeEmail()
-                }
-                .buttonStyle(WisentSecondaryButtonStyle())
+                .frame(maxWidth: .infinity)
             }
+            .keyboardShortcut(.return)
+            .buttonStyle(WisentPrimaryButtonStyle())
+            .disabled(store.isBusy)
+
+            Button("Use a different email") {
+                store.changeEmail()
+            }
+            .buttonStyle(.plain)
+            .font(WisentTypography.body(12))
+            .foregroundStyle(WisentDesign.brand)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
     }
 
     private var emailForm: some View {
         VStack(alignment: .leading, spacing: WisentDesign.Space.x3) {
-            WisentSectionHeader(
-                "Continue with email",
-                detail: "We will send a short-lived sign-in code."
-            )
-            TextField("you@company.com", text: $store.email)
-                .textFieldStyle(.roundedBorder)
-                .font(WisentTypography.body(14))
-                .accessibilityIdentifier("wisent.auth.email")
-                .onSubmit { Task { await store.sendCode() } }
-            Button("Send one-time code") {
+            VStack(alignment: .leading, spacing: WisentDesign.Space.x2) {
+                Text("Email")
+                    .font(WisentTypography.body(13).weight(.medium))
+                    .foregroundStyle(WisentDesign.ink)
+                TextField("you@company.com", text: $store.email)
+                    .textFieldStyle(.roundedBorder)
+                    .font(WisentTypography.body(14))
+                    .accessibilityIdentifier("wisent.auth.email")
+                    .onSubmit { Task { await store.sendCode() } }
+            }
+
+            Button {
                 Task { await store.sendCode() }
+            } label: {
+                HStack {
+                    Text("Sign in with Email")
+                    Spacer()
+                    Image(systemName: "arrow.right")
+                        .frame(width: 24, height: 24)
+                        .background(WisentDesign.surface, in: RoundedRectangle(cornerRadius: 6))
+                }
+                .frame(maxWidth: .infinity)
             }
             .keyboardShortcut(.return)
             .buttonStyle(WisentPrimaryButtonStyle())
@@ -202,17 +262,6 @@ private struct WisentSignInView: View {
 
             if store.oauthEnabled {
                 HStack(spacing: WisentDesign.Space.x2) {
-                    Rectangle()
-                        .fill(WisentDesign.border)
-                        .frame(height: WisentDesign.hairline)
-                    Text("OR")
-                        .font(WisentTypography.monoMedium(10))
-                        .foregroundStyle(WisentDesign.muted)
-                    Rectangle()
-                        .fill(WisentDesign.border)
-                        .frame(height: WisentDesign.hairline)
-                }
-                HStack(spacing: WisentDesign.Space.x3) {
                     WisentOAuthButton(.google) {
                         Task { await store.signInWithGoogle() }
                     }
@@ -222,7 +271,58 @@ private struct WisentSignInView: View {
                 }
                 .disabled(store.isBusy)
             }
+
+            Text(
+                "By clicking Sign In, you agree to our [Terms of Service](https://wisent.com/tos) and [Privacy Policy](https://wisent.com/privacy-policy)."
+            )
+            .font(WisentTypography.body(11))
+            .foregroundStyle(WisentDesign.muted)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: .infinity)
         }
+    }
+
+    private var brandPanel: some View {
+        ZStack(alignment: .bottomTrailing) {
+            heroImage
+                .resizable()
+                .scaledToFill()
+
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.12), .black.opacity(0.68)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+
+            VStack(alignment: .trailing, spacing: WisentDesign.Space.x3) {
+                Text(store.productName.uppercased())
+                    .font(WisentTypography.monoSemibold(11))
+                    .tracking(1)
+                    .foregroundStyle(.white.opacity(0.78))
+                Text("Unprecedented level of control.\nAvailable for everyone.")
+                    .font(WisentTypography.display(27))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.trailing)
+            }
+            .padding(WisentDesign.Space.x6)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: WisentDesign.Radius.xLarge))
+        .overlay {
+            RoundedRectangle(cornerRadius: WisentDesign.Radius.xLarge)
+                .stroke(.white.opacity(0.16), lineWidth: WisentDesign.hairline)
+        }
+        .shadow(color: .black.opacity(0.16), radius: 18, x: 0, y: 8)
+        .accessibilityHidden(true)
+    }
+
+    private var heroImage: Image {
+        guard let url = Bundle.module.url(
+            forResource: "signin-background",
+            withExtension: "jpg"
+        ), let image = NSImage(contentsOf: url) else {
+            preconditionFailure("Missing Wisent sign-in background")
+        }
+        return Image(nsImage: image)
     }
 
     @ViewBuilder

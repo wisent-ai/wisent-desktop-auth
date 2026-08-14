@@ -30,6 +30,7 @@ let package = Package(
                 .product(name: "WisentDesignSystem", package: "wisent-components"),
                 .product(name: "WisentErrors", package: "wisent-errors"),
             ],
+            resources: [.process("Resources")],
             linkerSettings: [.linkedFramework("Security")]
         ),
         .target(
