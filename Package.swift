@@ -16,12 +16,19 @@ let package = Package(
         // last tag that predated this dependency.
         .package(url: "https://github.com/wisent-ai/echo.git", from: "0.1.2"),
         .package(url: "https://github.com/wisent-ai/wisent-components.git", revision: "528a955"),
+        // The fleet's failure catalogue, pinned to a commit rather than a range:
+        // there is only one vocabulary if every consumer names the same one.
+        .package(
+            url: "https://github.com/wisent-ai/wisent-errors",
+            revision: "d2d1ba8478a6dfd4e744b6f6c6c6fc3e21d9e0a3"
+        ),
     ],
     targets: [
         .target(
             name: "WisentAuth",
             dependencies: [
                 .product(name: "WisentDesignSystem", package: "wisent-components"),
+                .product(name: "WisentErrors", package: "wisent-errors"),
             ],
             linkerSettings: [.linkedFramework("Security")]
         ),

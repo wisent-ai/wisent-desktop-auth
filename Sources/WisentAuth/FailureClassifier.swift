@@ -1,9 +1,14 @@
 import Foundation
+import WisentErrors
 import os
 
 /// Failure taxonomy shared with the Wisent web app, the Python backends, the
 /// Rust router and the iOS app, so one incident is named identically in a
-/// desktop sign-in sheet, in a server log and in the warehouse.
+/// desktop sign-in sheet, in a server log and in the warehouse. That sentence is
+/// a dependency now rather than a promise: the seven shared codes take their
+/// retry and outage answers, their status classification and the detail trim
+/// from `wisent-errors`, the fleet's one catalogue. The spellings below are the
+/// wire contract and stay here; nothing derivable from a code is decided here.
 ///
 /// Two rules this file exists to enforce, in this order:
 ///
@@ -35,33 +40,69 @@ public enum WisentFailureCode: String, Sendable, CaseIterable {
 
     /// Parses the `x-wisent-failure` header.
     ///
-    /// `offline` is deliberately rejected: a server cannot know that the
+    /// Membership is the catalogue's answer, not a local table: a header naming
+    /// something the fleet does not define is not a code. `offline` is therefore
+    /// rejected for free, and deliberately — a server cannot know that the
     /// client is offline, so a header claiming it is not trustworthy.
     init?(header: String?) {
         guard let raw = header?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
               !raw.isEmpty,
-              let parsed = WisentFailureCode(rawValue: raw),
-              parsed != .offline
+              let catalogue = WisentErrors.Code(rawValue: raw)
         else { return nil }
-        self = parsed
+        self.init(catalogue)
+    }
+
+    /// The local spelling of a catalogue code. Total: the seven raw values here
+    /// are the seven raw values there, which is what makes them one vocabulary.
+    init(_ catalogue: WisentErrors.Code) {
+        switch catalogue {
+        case .config: self = .config
+        case .auth: self = .auth
+        case .notFound: self = .notFound
+        case .rateLimit: self = .rateLimit
+        case .timeout: self = .timeout
+        case .infraDown: self = .infraDown
+        case .unknown: self = .unknown
+        }
+    }
+
+    /// The catalogue code this case is, or `nil` for `offline` — the one case the
+    /// fleet's vocabulary does not contain.
+    var catalogue: WisentErrors.Code? {
+        switch self {
+        case .config: .config
+        case .auth: .auth
+        case .notFound: .notFound
+        case .rateLimit: .rateLimit
+        case .timeout: .timeout
+        case .infraDown: .infraDown
+        case .unknown: .unknown
+        case .offline: nil
+        }
+    }
+
+    /// `offline`'s own answers, written here because the catalogue's seven
+    /// cannot express "this device has no network" and are not being stretched
+    /// to: `infra_down` would be the nearest, and it reports an outage we did
+    /// not have. A dead Wi-Fi link is worth retrying and is pointedly not our
+    /// breakage. Byte-identical to the table this file carried before.
+    private enum LocalOffline {
+        static let isRetryable = true
+        static let isOutage = false
     }
 
     /// Worth retrying without the user changing anything. Matches the exit-code
     /// split used by the Wisent command line tools.
     public var isRetryable: Bool {
-        switch self {
-        case .timeout, .infraDown, .rateLimit, .offline: true
-        case .config, .auth, .notFound, .unknown: false
-        }
+        guard let catalogue else { return LocalOffline.isRetryable }
+        return catalogue.retryable
     }
 
     /// True when our side is down, i.e. the user is owed an apology rather than
     /// a correction. `offline` is pointedly excluded.
     public var isOutage: Bool {
-        switch self {
-        case .config, .timeout, .infraDown: true
-        case .auth, .notFound, .rateLimit, .unknown, .offline: false
-        }
+        guard let catalogue else { return LocalOffline.isOutage }
+        return catalogue.outage
     }
 }
 
@@ -184,19 +225,12 @@ public struct WisentFailurePoint: Sendable, Equatable {
     }
 }
 
-/// RFC 9110 status codes. Spelled as strings because bare numeric literals are
-/// rejected in this repository.
+/// The two statuses this product reads differently from the fleet, and nothing
+/// else: the catalogue classifies every other status now. Spelled as strings
+/// because bare numeric literals are rejected in this repository.
 private enum HTTPStatus {
     static let badRequest = Int("400") ?? .zero
-    static let unauthorized = Int("401") ?? .zero
-    static let forbidden = Int("403") ?? .zero
-    static let notFound = Int("404") ?? .zero
-    static let requestTimeout = Int("408") ?? .zero
-    static let gone = Int("410") ?? .zero
     static let unprocessable = Int("422") ?? .zero
-    static let tooManyRequests = Int("429") ?? .zero
-    static let serverError = Int("500") ?? .zero
-    static let gatewayTimeout = Int("504") ?? .zero
 }
 
 /// Header names a Wisent service answers with. Read-only here: this library
@@ -339,33 +373,38 @@ enum WisentFailureClassifier {
     }
 
     /// Precedence: what the service said about itself, then the status code.
+    ///
+    /// The status ladder itself is the catalogue's, so this app cannot come to
+    /// read a status differently from the router, the backends or the iOS
+    /// client. What stays here is the two readings that are this product's own
+    /// and are not derivable from a status alone: an API key the identity
+    /// provider rejected is our deployment, and PostgREST's 404 for a function
+    /// nobody deployed is a broken release rather than a missing account.
     static func code(for response: WisentUpstreamResponse, service: WisentFailureService) -> WisentFailureCode {
         if let named = WisentFailureCode(header: response.headerCode) { return named }
 
-        switch response.status {
-        case HTTPStatus.unauthorized, HTTPStatus.forbidden:
+        // 400 and 422 carry no fleet-wide meaning — the catalogue calls them
+        // `unknown` — but they are exactly how the identity provider rejects a
+        // wrong one-time code, a stale refresh token or an unusable email, and
+        // how PostgREST reports a query we generated badly.
+        if response.status == HTTPStatus.badRequest || response.status == HTTPStatus.unprocessable {
+            if mentionsAPIKey(response.body) { return .config }
+            return service == .auth ? .auth : .config
+        }
+
+        let classified = WisentFailureCode(WisentErrors.Code.fromUpstream(status: response.status))
+        switch classified {
+        case .auth where mentionsAPIKey(response.body):
             // A rejected API key is our deployment being wrong, not the user's
             // password being wrong. The body decides; the body is never shown.
-            return mentionsAPIKey(response.body) ? .config : .auth
-        case HTTPStatus.notFound, HTTPStatus.gone:
+            return .config
+        case .notFound where service == .database:
             // PostgREST answers 404 for a route or function that was never
             // deployed. That is a broken release, and calling it "not found"
             // would tell the user their organization does not exist.
-            return service == .database ? .config : .notFound
-        case HTTPStatus.requestTimeout, HTTPStatus.gatewayTimeout:
-            return .timeout
-        case HTTPStatus.tooManyRequests:
-            return .rateLimit
-        case HTTPStatus.serverError...:
-            return .infraDown
-        case HTTPStatus.badRequest, HTTPStatus.unprocessable:
-            if mentionsAPIKey(response.body) { return .config }
-            // The identity provider rejects a wrong one-time code, a stale
-            // refresh token or an unusable email with 400/422. PostgREST
-            // answers 400 only when the query we generated is malformed.
-            return service == .auth ? .auth : .config
+            return .config
         default:
-            return .unknown
+            return classified
         }
     }
 
@@ -415,8 +454,10 @@ enum WisentFailureClassifier {
         )
     }
 
-    /// Collapses the detail onto one line and strips the one thing that must
-    /// not be persisted even for an operator: bearer material.
+    /// Collapses the detail onto one line, strips the one thing that must not be
+    /// persisted even for an operator — bearer material — and cuts it to this
+    /// product's own width. The width stays here; how to cut is the catalogue's
+    /// hard cut, which is what the rest of the fleet emits.
     private static func sanitize(_ detail: String) -> String {
         let singleLine = detail.split(whereSeparator: \.isNewline).joined(separator: " ")
         let redacted = Self.secretPattern.stringByReplacingMatches(
@@ -424,7 +465,7 @@ enum WisentFailureClassifier {
             range: NSRange(singleLine.startIndex..., in: singleLine),
             withTemplate: "$1<redacted>"
         )
-        return String(redacted.prefix(maxDiagnosticLength))
+        return trimDetail(redacted, limit: maxDiagnosticLength)
     }
 
     private static let secretPattern: NSRegularExpression = {
