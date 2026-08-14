@@ -118,7 +118,7 @@ private struct WisentSignInView: View {
 
                 HStack(spacing: WisentDesign.Space.x6) {
                     signInColumn
-                        .frame(width: min(400, max(360, proxy.size.width * 0.42)))
+                        .frame(width: min(440, max(400, proxy.size.width * 0.44)))
                         .frame(maxHeight: .infinity)
 
                     if proxy.size.width >= 900 {
@@ -190,8 +190,7 @@ private struct WisentSignInView: View {
                 .frame(maxWidth: .infinity, alignment: .center)
             }
         }
-        .frame(maxWidth: 400)
-        .padding(.horizontal, WisentDesign.Space.x4)
+        .frame(maxWidth: 440)
     }
 
     private var codeForm: some View {
@@ -277,34 +276,39 @@ private struct WisentSignInView: View {
             )
             .font(WisentTypography.body(11))
             .foregroundStyle(WisentDesign.muted)
+            .tint(WisentDesign.brand)
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
         }
     }
 
     private var brandPanel: some View {
-        ZStack(alignment: .bottomTrailing) {
-            heroImage
-                .resizable()
-                .scaledToFill()
+        GeometryReader { proxy in
+            ZStack(alignment: .bottomTrailing) {
+                heroImage
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: proxy.size.width, height: proxy.size.height)
+                    .clipped()
 
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.12), .black.opacity(0.68)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
+                LinearGradient(
+                    colors: [.clear, .black.opacity(0.12), .black.opacity(0.68)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
 
-            VStack(alignment: .trailing, spacing: WisentDesign.Space.x3) {
-                Text(store.productName.uppercased())
-                    .font(WisentTypography.monoSemibold(11))
-                    .tracking(1)
-                    .foregroundStyle(.white.opacity(0.78))
-                Text("Unprecedented level of control.\nAvailable for everyone.")
-                    .font(WisentTypography.display(27))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.trailing)
+                VStack(alignment: .trailing, spacing: WisentDesign.Space.x3) {
+                    Text(store.productName.uppercased())
+                        .font(WisentTypography.monoSemibold(11))
+                        .tracking(1)
+                        .foregroundStyle(.white.opacity(0.78))
+                    Text("Unprecedented level of control.\nAvailable for everyone.")
+                        .font(WisentTypography.display(27))
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.trailing)
+                }
+                .padding(WisentDesign.Space.x6)
             }
-            .padding(WisentDesign.Space.x6)
         }
         .clipShape(RoundedRectangle(cornerRadius: WisentDesign.Radius.xLarge))
         .overlay {
