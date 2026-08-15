@@ -8,5 +8,5 @@ SOURCE="$ROOT/Sources/WisentIdentityKeychainHelper/main.swift"
 mkdir -p "$(dirname "$OUTPUT")"
 TEMP=$(mktemp "$OUTPUT.building.XXXXXXXX")
 trap 'rm -f "$TEMP"' EXIT
-swiftc -O -framework Security "$SOURCE" -o "$TEMP"
+swiftc -parse-as-library -O -framework Security "$SOURCE" -o "$TEMP"
 install -m 0755 "$TEMP" "$OUTPUT"
