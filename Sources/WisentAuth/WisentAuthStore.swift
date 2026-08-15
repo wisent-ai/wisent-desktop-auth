@@ -20,10 +20,17 @@ public final class WisentAuthStore: ObservableObject {
     @Published public private(set) var organizations: [WisentOrganization] = []
     @Published public private(set) var restoredIdentity: WisentRestoredIdentity?
     @Published public private(set) var selectedOrganization: WisentOrganization?
-    @Published public var email = ""
+    @Published public var email = "" {
+        didSet {
+            guard email != oldValue else { return }
+            resetResendCountdown()
+        }
+    }
     @Published public var code = ""
     @Published public private(set) var isBusy = false
     @Published public private(set) var isOAuthBusy = false
+    @Published public private(set) var loadingProvider: String?
+    @Published public private(set) var resendCountdown: Int = 0
     @Published public private(set) var errorMessage: String?
 
     /// The classified form of ``errorMessage``. Lets a host app tell the user's
@@ -50,9 +57,11 @@ public final class WisentAuthStore: ObservableObject {
     private var started = false
     private var restoredIdentityPending = false
     private var refreshTask: Task<Void, Never>?
+    private var resendCountdownTask: Task<Void, Never>?
     private var webSession: (any OAuthWebSession)?
     private let webSessionFactory: @MainActor () -> any OAuthWebSession
     private static let refreshLeadTime: TimeInterval = 5 * 60
+    private static let resendDuration = 60
 
     public convenience init(productName: String) {
         let bundleIdentifier = Bundle.main.bundleIdentifier ?? "ai.wisent.\(productName.lowercased())"
@@ -79,6 +88,7 @@ public final class WisentAuthStore: ObservableObject {
 
     deinit {
         refreshTask?.cancel()
+        resendCountdownTask?.cancel()
     }
 
     public var identity: WisentIdentity? {
@@ -141,24 +151,48 @@ public final class WisentAuthStore: ObservableObject {
             note("Enter a valid email address.")
             return
         }
+        guard !isBusy else { return }
+        loadingProvider = "email"
+        defer { loadingProvider = nil }
         await perform(point: .otpRequest) {
             try await client.requestOTP(email: address)
             email = address
             code = ""
             status = .waitingForCode
+            startResendCountdown()
         }
     }
 
     public func verifyCode() async {
         let token = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty else {
-            note("Enter the code from your email.")
+        guard token.count == 6 else {
+            note("Please enter all 6 digits")
             return
         }
-        await perform(point: .otpVerify) {
+        guard !isBusy else { return }
+        isBusy = true
+        clearFailure()
+        defer { isBusy = false }
+        do {
             let newSession = try await client.verifyOTP(email: email, code: token)
             try await accept(newSession)
+        } catch {
+            _ = report(error, point: .otpVerify)
+            errorMessage = "Verification code is incorrect. Please, try again"
         }
+    }
+
+    public func resendCode() async {
+        guard resendCountdown == 0, !isBusy else { return }
+        await perform(point: .otpRequest) {
+            try await client.requestOTP(email: email)
+            code = ""
+            startResendCountdown()
+        }
+    }
+
+    public func signInWithApple() async {
+        await signInWithOAuth(provider: "apple", label: "Apple")
     }
 
     public func signInWithGoogle() async {
@@ -169,9 +203,8 @@ public final class WisentAuthStore: ObservableObject {
         await signInWithOAuth(provider: "github", label: "GitHub")
     }
 
-
-
     public func changeEmail() {
+        resetResendCountdown()
         code = ""
         clearFailure()
         status = .signedOut
@@ -332,6 +365,7 @@ public final class WisentAuthStore: ObservableObject {
     public func signOut() async {
         refreshTask?.cancel()
         refreshTask = nil
+        resetResendCountdown()
         if let token = session?.accessToken {
             try? await client.signOut(accessToken: token)
         }
@@ -384,10 +418,12 @@ public final class WisentAuthStore: ObservableObject {
         guard !isBusy else { return }
         isBusy = true
         isOAuthBusy = true
+        loadingProvider = provider
         clearFailure()
         defer {
             isBusy = false
             isOAuthBusy = false
+            loadingProvider = nil
             webSession = nil
         }
         do {
@@ -416,6 +452,7 @@ public final class WisentAuthStore: ObservableObject {
     private func accept(_ newSession: WisentSession) async throws {
         restoredIdentity = nil
         restoredIdentityPending = false
+        resetResendCountdown()
         session = newSession
         email = newSession.email
         code = ""
@@ -510,6 +547,33 @@ public final class WisentAuthStore: ObservableObject {
         } catch {
             report(error, point: point)
         }
+    }
+
+    private func startResendCountdown() {
+        resendCountdownTask?.cancel()
+        resendCountdown = Self.resendDuration
+        resendCountdownTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(1))
+                } catch {
+                    return
+                }
+                guard let self, !Task.isCancelled else { return }
+                guard self.resendCountdown > 0 else { return }
+                self.resendCountdown -= 1
+                if self.resendCountdown == 0 {
+                    self.resendCountdownTask = nil
+                    return
+                }
+            }
+        }
+    }
+
+    private func resetResendCountdown() {
+        resendCountdownTask?.cancel()
+        resendCountdownTask = nil
+        resendCountdown = 0
     }
 
     private func scheduleRefresh(for session: WisentSession) {
