@@ -183,6 +183,25 @@ Add the product to the application target:
 .product(name: "WisentAuth", package: "wisent-desktop-auth")
 ```
 
+Packaged hosts must build the shared Keychain helper from the resolved package
+checkout, place it at
+`Contents/Helpers/WisentIdentityKeychainHelper`, and sign it with the same stable
+Wisent identity and the fixed identifier
+`ai.wisent.identity.keychain-helper`:
+
+```sh
+AUTH_CHECKOUT=.build/checkouts/wisent-desktop-auth
+"$AUTH_CHECKOUT/scripts/build-keychain-helper.sh" \
+  "$APP_BUNDLE/Contents/Helpers/WisentIdentityKeychainHelper"
+codesign --force --identifier ai.wisent.identity.keychain-helper \
+  --sign "$CODESIGN_IDENTITY" \
+  "$APP_BUNDLE/Contents/Helpers/WisentIdentityKeychainHelper"
+```
+
+The helper sends the session only through inherited pipes and owns the one
+shared login-Keychain item. A source-only `swift run` has no packaged helper and
+therefore keeps bundle-scoped storage.
+
 Wrap the application content:
 
 ```swift
@@ -296,10 +315,11 @@ the classified failure rather than parsing text in `errorMessage`.
 
 ## Security and privacy
 
-- Access and refresh tokens are saved as one generic Keychain item in the
-  signed `LNTWB5B9DV.ai.wisent.identity` access group, with
-  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`; an app without that
-  entitlement remains bundle-scoped and cannot read the shared item.
+- Access and refresh tokens are saved as one generic login-Keychain item owned
+  by the packaged `WisentIdentityKeychainHelper`. Every client signs an identical
+  helper identifier with the same Wisent signing identity, so Keychain evaluates
+  one designated requirement without a restricted access-group entitlement or
+  provisioning profile.
 - Keychain storage protects persistence; it does not prevent a compromised host
   process from reading the public in-memory identity/access token.
 - The default session begins refresh five minutes before expiry. Servers must
@@ -313,11 +333,11 @@ the classified failure rather than parsing text in `errorMessage`.
 - Supabase RLS and RPC authorization must fail closed. UI role checks and selected
   organization IDs are attacker-controlled client input.
 - Share only the user's Wisent identity session. Provider, workload, browser,
-  payment, and customer-resource credentials remain outside the shared access
-  group and under their owning product or Skarbiec boundary.
-- Production hosts must be signed by the Wisent team and carry the shared
-  Keychain entitlement. Ad-hoc previews intentionally fall back to isolated,
-  bundle-scoped storage.
+  payment, and customer-resource credentials remain outside the shared store and
+  under their owning product or Skarbiec boundary.
+- Production hosts must package and sign the fixed-identifier helper. Source-only
+  and incomplete bundles intentionally fall back to isolated, bundle-scoped
+  storage.
 
 ## Operational model
 

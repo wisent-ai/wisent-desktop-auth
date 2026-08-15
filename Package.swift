@@ -8,6 +8,10 @@ let package = Package(
         .library(name: "WisentAuth", targets: ["WisentAuth"]),
         .library(name: "WisentAuthOnboarding", targets: ["WisentAuthOnboarding"]),
         .executable(name: "wisent-auth-onboarding-host", targets: ["WisentAuthOnboardingHost"]),
+        .executable(
+            name: "wisent-identity-keychain-helper",
+            targets: ["WisentIdentityKeychainHelper"]
+        ),
     ],
     dependencies: [
         // Consumed by URL, not by sibling path: a path dependency inside a
@@ -50,6 +54,10 @@ let package = Package(
                 .product(name: "WisentOnboarding", package: "echo"),
             ],
             path: "Sources/WisentAuthOnboardingHost"
+        ),
+        .executableTarget(
+            name: "WisentIdentityKeychainHelper",
+            linkerSettings: [.linkedFramework("Security")]
         ),
         .testTarget(
             name: "WisentAuthTests",

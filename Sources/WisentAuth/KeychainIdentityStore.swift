@@ -11,6 +11,7 @@ struct KeychainIdentityStore: IdentityPersistence, @unchecked Sendable {
     static let sharedService = "ai.wisent.identity"
     static let sharedAccessGroupSuffix = ".ai.wisent.identity"
 
+    private let helper: SharedIdentityKeychainHelper?
     private let service: String
     private let accessGroup: String?
     private let legacyService: String
@@ -19,6 +20,7 @@ struct KeychainIdentityStore: IdentityPersistence, @unchecked Sendable {
     private let decoder: JSONDecoder
 
     init(bundleIdentifier: String) {
+        helper = SharedIdentityKeychainHelper.installed()
         legacyService = "\(bundleIdentifier).wisent-identity"
         accessGroup = Self.sharedAccessGroup()
         service = accessGroup == nil ? legacyService : Self.sharedService
@@ -29,6 +31,36 @@ struct KeychainIdentityStore: IdentityPersistence, @unchecked Sendable {
     }
 
     func load() throws -> StoredIdentity? {
+        if let helper {
+            if let data = try helper.load() {
+                return try decoder.decode(StoredIdentity.self, from: data)
+            }
+            guard let fallback = try loadKeychainValue() else {
+                return nil
+            }
+
+            try helper.save(encoder.encode(fallback))
+            try deleteKeychainStores()
+            return fallback
+        }
+        return try loadKeychainWithAccessGroupMigration()
+    }
+
+    func save(_ value: StoredIdentity) throws {
+        let data = try encoder.encode(value)
+        if let helper {
+            try helper.save(data)
+        } else {
+            try saveToKeychain(data)
+        }
+    }
+
+    func clear() throws {
+        try helper?.clear()
+        try deleteKeychainStores()
+    }
+
+    private func loadKeychainWithAccessGroupMigration() throws -> StoredIdentity? {
         if let shared = try load(service: service, accessGroup: accessGroup) {
             return shared
         }
@@ -37,13 +69,20 @@ struct KeychainIdentityStore: IdentityPersistence, @unchecked Sendable {
             return nil
         }
 
-        try save(legacy)
+        try saveToKeychain(encoder.encode(legacy))
         try delete(service: legacyService, accessGroup: nil)
         return legacy
     }
 
-    func save(_ value: StoredIdentity) throws {
-        let data = try encoder.encode(value)
+    private func loadKeychainValue() throws -> StoredIdentity? {
+        if accessGroup != nil,
+           let shared = try load(service: Self.sharedService, accessGroup: accessGroup) {
+            return shared
+        }
+        return try load(service: legacyService, accessGroup: nil)
+    }
+
+    private func saveToKeychain(_ data: Data) throws {
         let query = query(service: service, accessGroup: accessGroup)
         let updateStatus = SecItemUpdate(
             query as CFDictionary,
@@ -73,13 +112,6 @@ struct KeychainIdentityStore: IdentityPersistence, @unchecked Sendable {
         }
     }
 
-    func clear() throws {
-        try delete(service: service, accessGroup: accessGroup)
-        if accessGroup != nil {
-            try delete(service: legacyService, accessGroup: nil)
-        }
-    }
-
     private func load(service: String, accessGroup: String?) throws -> StoredIdentity? {
         var item = query(service: service, accessGroup: accessGroup)
         item[kSecReturnData as String] = true
@@ -92,6 +124,13 @@ struct KeychainIdentityStore: IdentityPersistence, @unchecked Sendable {
             throw WisentAuthError.keychain(status)
         }
         return try decoder.decode(StoredIdentity.self, from: data)
+    }
+
+    private func deleteKeychainStores() throws {
+        if let accessGroup {
+            try delete(service: Self.sharedService, accessGroup: accessGroup)
+        }
+        try delete(service: legacyService, accessGroup: nil)
     }
 
     private func delete(service: String, accessGroup: String?) throws {
