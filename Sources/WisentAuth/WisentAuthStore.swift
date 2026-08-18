@@ -64,12 +64,22 @@ public final class WisentAuthStore: ObservableObject {
     private static let resendDuration = 60
 
     public convenience init(productName: String) {
-        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "ai.wisent.\(productName.lowercased())"
+        let bundleIdentifier = Bundle.main.bundleIdentifier
+            ?? "ai.wisent.\(WisentAuthStore.identifierSlug(from: productName))"
         self.init(
             productName: productName,
             bundleIdentifier: bundleIdentifier,
             configuration: .production(bundleIdentifier: bundleIdentifier)
         )
+    }
+
+    /// A display name is not an identifier: unbundled hosts would otherwise
+    /// derive a Keychain service containing spaces.
+    static func identifierSlug(from productName: String) -> String {
+        productName
+            .lowercased()
+            .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            .joined(separator: "-")
     }
 
     init(
