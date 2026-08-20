@@ -1,11 +1,13 @@
 [automation]
 managed = true
-source_fingerprint = "fca450c025ba46d2"
+source_fingerprint = "e0b4e9b2bacfcde5"
 category = "developer"
+copy_status = "missing"
+approved_in = ""
 
 [banner]
-title = "One secure identity layer for Wisent macOS apps."
-description = "Swift package for Supabase sign-in, organizations, entitlements, sessions, and Keychain storage."
+title = "Wisent Desktop Auth"
+description = ""
 product = "Wisent"
 url = "wisent.com"
 theme = "dark"
