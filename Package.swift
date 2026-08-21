@@ -19,7 +19,7 @@ let package = Package(
         // .build/checkouts, which silently downgraded every consumer to the
         // last tag that predated this dependency.
         .package(url: "https://github.com/wisent-ai/echo.git", from: "0.1.2"),
-        .package(url: "https://github.com/wisent-ai/wisent-components.git", revision: "63aab577abc78c4d1993a711236479dbc2c2571a"),
+        .package(url: "https://github.com/wisent-ai/wisent-components.git", revision: "35d8cc4a528de3e4ab8c67a64e68ce8a9c994ef1"),
         // The fleet's failure catalogue, pinned to a commit rather than a range:
         // there is only one vocabulary if every consumer names the same one.
         .package(
