@@ -24,7 +24,7 @@ let package = Package(
         // there is only one vocabulary if every consumer names the same one.
         .package(
             url: "https://github.com/wisent-ai/wisent-errors",
-            revision: "92da74a839b5d3202183f0a850745f6fc205ed12"
+            revision: "b01a0c99766b5c6378ecdbf3921108420ba058f1"
         ),
     ],
     targets: [

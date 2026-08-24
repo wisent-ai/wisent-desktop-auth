@@ -23,7 +23,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/wisent-ai/wisent-errors",
       "state" : {
-        "revision" : "92da74a839b5d3202183f0a850745f6fc205ed12"
+        "revision" : "b01a0c99766b5c6378ecdbf3921108420ba058f1"
       }
     }
   ],
