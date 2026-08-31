@@ -88,11 +88,14 @@ public struct WisentAuthGate<Content: View>: View {
     }
 
     private var organizationLoadingView: some View {
-        VStack(spacing: 14) {
-            ProgressView()
-                .controlSize(.large)
-            Text(store.status == .resolvingOrganization ? "Loading organizations…" : "Restoring Wisent session…")
+        let name = store.status == .resolvingOrganization
+            ? "Loading organizations"
+            : "Restoring Wisent session"
+        return VStack(spacing: 14) {
+            Text("\(name)…")
                 .foregroundStyle(.secondary)
+            WisentSkeletonList(rows: 3, lines: 2, media: true, label: name)
+                .frame(width: 360)
         }
         .frame(minWidth: 520, minHeight: 420)
     }
@@ -578,40 +581,36 @@ private struct WisentAuthLoadingView: View {
             let showsRightSkeleton = proxy.size.width >= 1_024
             HStack(spacing: 0) {
                 VStack(spacing: 24) {
-                    LoginSkeletonBlock(width: 64, height: 64, radius: 32)
+                    WisentSkeleton(.circle, width: 64, height: 64)
                         .frame(maxWidth: .infinity)
 
-                    LoginSkeletonBlock(width: 192, height: 32, radius: 4)
+                    WisentSkeleton(.heading, width: 192, height: 32)
                         .frame(maxWidth: .infinity)
-                    LoginSkeletonBlock(width: 256, height: 16, radius: 4)
+                    WisentSkeleton(.line, width: 256, height: 16)
                         .frame(maxWidth: .infinity)
 
                     VStack(spacing: 16) {
-                        LoginSkeletonBlock(width: 360, height: 48, radius: 8)
-                        LoginSkeletonBlock(width: 360, height: 48, radius: 8)
-                        LoginSkeletonBlock(width: 360, height: 48, radius: 24)
+                        WisentSkeleton(.block, width: 360, height: 48)
+                        WisentSkeleton(.block, width: 360, height: 48)
+                        WisentSkeleton(.pill, width: 360, height: 48)
                     }
                     .padding(.top, 16)
 
                     HStack(spacing: 16) {
-                        Rectangle()
-                            .fill(LoginPalette.skeleton)
-                            .frame(height: 1)
-                        LoginSkeletonBlock(width: 32, height: 16, radius: 4)
-                        Rectangle()
-                            .fill(LoginPalette.skeleton)
-                            .frame(height: 1)
+                        WisentSkeleton(.line, height: 1)
+                        WisentSkeleton(.line, width: 32, height: 16)
+                        WisentSkeleton(.line, height: 1)
                     }
                     .padding(.top, 16)
 
-                    LoginSkeletonBlock(width: 360, height: 48, radius: 24)
+                    WisentSkeleton(.pill, width: 360, height: 48)
                 }
                 .frame(width: 360)
                 .padding(.horizontal, 32)
                 .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
 
                 if showsRightSkeleton {
-                    LoginSkeletonBlock(width: 320, height: 320, radius: 8)
+                    WisentSkeleton(.block, width: 320, height: 320)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
@@ -630,27 +629,8 @@ private struct WisentAuthLoadingView: View {
         }
         .clipped()
         .frame(minWidth: 480)
-        .accessibilityLabel("Loading")
+        .accessibilityLabel("Loading sign-in")
         .accessibilityIdentifier("wisent.auth.loading")
-    }
-}
-
-private struct LoginSkeletonBlock: View {
-    let width: CGFloat
-    let height: CGFloat
-    let radius: CGFloat
-    @State private var isPulsing = false
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: radius)
-            .fill(LoginPalette.skeleton)
-            .frame(width: width, height: height)
-            .opacity(isPulsing ? 0.45 : 1)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 2).repeatForever(autoreverses: true)) {
-                    isPulsing = true
-                }
-            }
     }
 }
 
@@ -712,17 +692,12 @@ private struct LoginOAuthButton: View {
 
     var body: some View {
         Button(action: action) {
-            Group {
-                if isLoading {
-                    LoginSpinner()
-                } else {
-                    Image(nsImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 24, height: 24)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 24, height: 24)
+                .opacity(isLoading ? 0.35 : 1)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
@@ -737,27 +712,6 @@ private struct LoginOAuthButton: View {
         .disabled(isDisabled)
         .onHover { isHovering = $0 }
         .accessibilityLabel("Sign in with \(label)")
-    }
-}
-
-private struct LoginSpinner: View {
-    @State private var rotation = 0.0
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .stroke(LoginPalette.spinner.opacity(0.25), lineWidth: 4)
-            Circle()
-                .trim(from: 0, to: 0.25)
-                .stroke(LoginPalette.spinner.opacity(0.75), style: StrokeStyle(lineWidth: 4, lineCap: .butt))
-        }
-        .frame(width: 20, height: 20)
-        .rotationEffect(.degrees(rotation))
-        .onAppear {
-            withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
-                rotation = 360
-            }
-        }
     }
 }
 
@@ -783,14 +737,12 @@ private enum LoginPalette {
     static let verificationError = Color(red: 212 / 255, green: 51 / 255, blue: 40 / 255)
     static let heroText = Color(red: 222 / 255, green: 228 / 255, blue: 226 / 255)
     static let inputShadow = Color(red: 10 / 255, green: 13 / 255, blue: 18 / 255).opacity(0.05)
-    static let spinner = Color(red: 107 / 255, green: 114 / 255, blue: 128 / 255)
     static let successBackground = Color(red: 240 / 255, green: 253 / 255, blue: 244 / 255)
     static let successText = Color(red: 22 / 255, green: 101 / 255, blue: 52 / 255)
     static let successBorder = Color(red: 187 / 255, green: 247 / 255, blue: 208 / 255)
     static let errorBackground = Color(red: 254 / 255, green: 242 / 255, blue: 242 / 255)
     static let errorText = Color(red: 153 / 255, green: 27 / 255, blue: 27 / 255)
     static let errorBorder = Color(red: 254 / 255, green: 202 / 255, blue: 202 / 255)
-    static let skeleton = Color(red: 229 / 255, green: 231 / 255, blue: 235 / 255)
     static let skeletonStart = Color(red: 249 / 255, green: 250 / 255, blue: 251 / 255)
     static let skeletonEnd = Color(red: 243 / 255, green: 244 / 255, blue: 246 / 255)
 }
@@ -894,7 +846,7 @@ private struct OrganizationInvitationReviewView: View {
             }
 
             if store.isBusy {
-                ProgressView().controlSize(.small)
+                WisentSkeleton(.pill, width: 140, height: 14)
             }
             if let error = store.errorMessage {
                 WisentFailureBanner(
@@ -938,7 +890,7 @@ private struct OrganizationManagementView: View {
                 }
                 Spacer()
                 if store.isOrganizationBusy {
-                    ProgressView().controlSize(.small)
+                    WisentSkeleton(.pill, width: 90, height: 14)
                 }
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.cancelAction)
@@ -1054,7 +1006,8 @@ private struct OrganizationManagementView: View {
             }
             .overlay {
                 if store.isOrganizationBusy && store.organizationMembers.isEmpty {
-                    ProgressView("Loading team…")
+                    WisentSkeletonList(rows: 4, lines: 2, media: true, label: "Loading team")
+                        .padding(20)
                 }
             }
         }

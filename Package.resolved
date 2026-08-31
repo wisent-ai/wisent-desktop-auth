@@ -1,31 +1,31 @@
 {
-  "originHash": "27221969bd1781ffe915c647ccda62357b0021c09193931056f87a83c8c1c7f9",
-  "pins": [
+  "originHash" : "d4626fd9a6d435d9caa814c2c53864ddd1a622b0a358ad2b5df46985993aabd5",
+  "pins" : [
     {
-      "identity": "echo",
-      "kind": "remoteSourceControl",
-      "location": "https://github.com/wisent-ai/echo.git",
-      "state": {
-        "revision": "7c4677dbc2cff315110510447dafbd69d1128792",
-        "version": "0.1.2"
+      "identity" : "echo",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/wisent-ai/echo.git",
+      "state" : {
+        "revision" : "7c4677dbc2cff315110510447dafbd69d1128792",
+        "version" : "0.1.2"
       }
     },
     {
-      "identity": "wisent-components",
-      "kind": "remoteSourceControl",
-      "location": "https://github.com/wisent-ai/wisent-components.git",
-      "state": {
-        "revision": "63aab577abc78c4d1993a711236479dbc2c2571a"
+      "identity" : "wisent-components",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/wisent-ai/wisent-components.git",
+      "state" : {
+        "revision" : "f14592908b943509ea90d95d12ee06a28245e3a6"
       }
     },
     {
-      "identity": "wisent-errors",
-      "kind": "remoteSourceControl",
-      "location": "https://github.com/wisent-ai/wisent-errors",
-      "state": {
-        "revision": "b01a0c99766b5c6378ecdbf3921108420ba058f1"
+      "identity" : "wisent-errors",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/wisent-ai/wisent-errors",
+      "state" : {
+        "revision" : "b01a0c99766b5c6378ecdbf3921108420ba058f1"
       }
     }
   ],
-  "version": 3
+  "version" : 3
 }
