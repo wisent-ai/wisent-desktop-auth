@@ -1,5 +1,5 @@
 {
-  "source": "git-archive:0.2.1 no GitHub Release is published, established by reading the releases API's answer for wisent-ai/wisent-desktop-auth; SwiftPM resolves this package by tag, and sibling Package.resolved files pin this version",
+  "source": "git-archive:0.2.2 no GitHub Release is published, established by reading the releases API's answer for wisent-ai/wisent-desktop-auth; SwiftPM resolves this package by tag, and sibling Package.resolved files pin this version",
   "surface": [
     "case:WisentAuthStatus.choosingOrganization",
     "case:WisentAuthStatus.ready",
@@ -65,6 +65,7 @@
     "member:WisentAuthStore.isOAuthBusy",
     "member:WisentAuthStore.isOrganizationBusy",
     "member:WisentAuthStore.loadOrganizationManagement",
+    "member:WisentAuthStore.loadingProvider",
     "member:WisentAuthStore.oauthEnabled",
     "member:WisentAuthStore.organizationError",
     "member:WisentAuthStore.organizationFailure",
@@ -75,6 +76,8 @@
     "member:WisentAuthStore.permissionReport",
     "member:WisentAuthStore.productName",
     "member:WisentAuthStore.removeOrganizationMember",
+    "member:WisentAuthStore.resendCode",
+    "member:WisentAuthStore.resendCountdown",
     "member:WisentAuthStore.restoredIdentity",
     "member:WisentAuthStore.retry",
     "member:WisentAuthStore.selectOrganization",
@@ -82,6 +85,7 @@
     "member:WisentAuthStore.sendCode",
     "member:WisentAuthStore.sendOrganizationInvitation",
     "member:WisentAuthStore.session",
+    "member:WisentAuthStore.signInWithApple",
     "member:WisentAuthStore.signInWithGitHub",
     "member:WisentAuthStore.signInWithGoogle",
     "member:WisentAuthStore.signOut",
@@ -172,5 +176,5 @@
     "type:WisentSession",
     "type:WisentUserInvite"
   ],
-  "version": "0.2.1"
+  "version": "0.2.2"
 }
