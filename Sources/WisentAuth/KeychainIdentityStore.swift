@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import os
 
 protocol IdentityPersistence: Sendable {
     func load() throws -> StoredIdentity?
@@ -30,19 +31,34 @@ struct KeychainIdentityStore: IdentityPersistence, @unchecked Sendable {
         decoder.dateDecodingStrategy = .iso8601
     }
 
+    /// Three sources can answer, and until this log existed the caller could
+    /// not tell which one did - or tell "nothing is stored" apart from "the
+    /// packaged helper said not-found while a shared item was sitting right
+    /// there". Both arrive as `nil`.
+    private static let log = Logger(
+        subsystem: "ai.wisent.desktop.auth",
+        category: "keychain"
+    )
+
     func load() throws -> StoredIdentity? {
         if let helper {
             if let data = try helper.load() {
+                Self.log.notice("identity read from the packaged helper's shared item")
                 return try decoder.decode(StoredIdentity.self, from: data)
             }
             guard let fallback = try loadKeychainValue() else {
+                Self.log.notice(
+                    "no identity: the helper reported not-found and no legacy item exists"
+                )
                 return nil
             }
 
+            Self.log.notice("identity found in the legacy per-app item; migrating to the helper")
             try helper.save(encoder.encode(fallback))
             try deleteKeychainStores()
             return fallback
         }
+        Self.log.notice("no packaged helper in this bundle; reading the per-app item directly")
         return try loadKeychainWithAccessGroupMigration()
     }
 

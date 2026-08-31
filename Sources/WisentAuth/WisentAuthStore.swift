@@ -2,6 +2,7 @@ import AppKit
 import AuthenticationServices
 import Combine
 import Foundation
+import os
 
 public enum WisentAuthStatus: Equatable {
     case restoring
@@ -62,6 +63,29 @@ public final class WisentAuthStore: ObservableObject {
     private let webSessionFactory: @MainActor () -> any OAuthWebSession
     private static let refreshLeadTime: TimeInterval = 5 * 60
     private static let resendDuration = 60
+
+    /// Why the app is on the sign-in screen has to survive the app.
+    ///
+    /// `errorMessage` is a `@Published` value read by one SwiftUI banner: it
+    /// dies with the view state, it is invisible to the operator and to any
+    /// tooling, and on the one path that ends at a silent `.signedOut` it is
+    /// never set at all. On 2026-08-31 a Jeden Desktop instance was found
+    /// sitting on a first-run welcome screen, having started on 2026-08-27 half
+    /// an hour after the shared session expired, with that session still intact
+    /// in the Keychain and nothing anywhere on the machine saying what the
+    /// restore had decided. The reason was unrecoverable by then.
+    ///
+    /// These lines are `notice`, so they persist, and they name only the
+    /// decision: no token, no access token, no refresh token, no email.
+    private static let restoreLog = Logger(
+        subsystem: "ai.wisent.desktop.auth",
+        category: "restore"
+    )
+    private static let expiryFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
 
     public convenience init(productName: String) {
         let bundleIdentifier = Bundle.main.bundleIdentifier
@@ -125,16 +149,42 @@ public final class WisentAuthStore: ObservableObject {
 
         do {
             guard var stored = try persistence.load() else {
+                // Absence, not failure - but it still has to be on the record,
+                // because from the outside this is indistinguishable from a
+                // stored identity we failed to read.
+                Self.restoreLog.notice(
+                    "\(self.productName, privacy: .public): no stored identity; showing sign-in"
+                )
                 status = .signedOut
                 return
             }
             restoredIdentityPending = true
+            let storedExpiry = Self.expiryFormatter.string(from: stored.session.expiresAt)
             if stored.session.expiresAt.timeIntervalSinceNow <= Self.refreshLeadTime {
+                Self.restoreLog.notice(
+                    """
+                    \(self.productName, privacy: .public): stored session expired or inside the \
+                    refresh lead time (expiry \(storedExpiry, privacy: .public)); refreshing
+                    """
+                )
                 stored = StoredIdentity(
                     session: try await client.refresh(refreshToken: stored.session.refreshToken),
                     selectedOrganizationID: stored.selectedOrganizationID
                 )
                 try persistence.save(stored)
+                Self.restoreLog.notice(
+                    """
+                    \(self.productName, privacy: .public): refresh accepted; new expiry \
+                    \(Self.expiryFormatter.string(from: stored.session.expiresAt), privacy: .public)
+                    """
+                )
+            } else {
+                Self.restoreLog.notice(
+                    """
+                    \(self.productName, privacy: .public): restored a live session (expiry \
+                    \(storedExpiry, privacy: .public)); no refresh needed
+                    """
+                )
             }
             session = stored.session
             email = stored.session.email
@@ -151,6 +201,13 @@ public final class WisentAuthStore: ObservableObject {
                 session = nil
                 restoredIdentityPending = false
             }
+            Self.restoreLog.error(
+                """
+                \(self.productName, privacy: .public): restore failed as \
+                \(String(describing: restore.code), privacy: .public); stored identity \
+                \(restore.code == .auth ? "cleared" : "kept", privacy: .public); showing sign-in
+                """
+            )
             status = .signedOut
         }
     }
