@@ -85,6 +85,12 @@ public extension WisentOrganization {
     }
 }
 
+extension WisentOrganization {
+    static let fixedWisentOrganizationID = "00000000-0000-4000-8000-000000000001"
+
+    var isFixedWisentOrganization: Bool { id == Self.fixedWisentOrganizationID }
+}
+
 public struct WisentOrganizationMember: Codable, Sendable, Equatable, Identifiable {
     public let userID: String
     public let email: String

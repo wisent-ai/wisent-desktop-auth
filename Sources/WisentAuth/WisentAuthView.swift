@@ -962,7 +962,19 @@ private struct OrganizationManagementView: View {
 
             Divider()
 
-            if store.selectedOrganization?.organizationRole?.canManageMembers == true {
+            if store.selectedOrganization?.isFixedWisentOrganization == true {
+                GroupBox("Managed centrally") {
+                    Label(
+                        "The Wisent organization is managed centrally. Its name, slug, and deletion settings cannot be changed here.",
+                        systemImage: "lock.shield"
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 4)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
+            } else if store.selectedOrganization?.organizationRole?.canManageMembers == true {
                 GroupBox("Organization details") {
                     VStack(spacing: 10) {
                         HStack {
@@ -1047,10 +1059,7 @@ private struct OrganizationManagementView: View {
                             if canManage(member) {
                                 Menu {
                                     if store.selectedOrganization?.organizationRole == .owner {
-                                        ForEach(
-                                            [WisentOrganizationRole.admin, .member],
-                                            id: \.self
-                                        ) { role in
+                                        ForEach(WisentOrganizationRole.allCases, id: \.self) { role in
                                             Button("Make \(role.rawValue)") {
                                                 Task {
                                                     await store.updateOrganizationMemberRole(
@@ -1112,13 +1121,17 @@ private struct OrganizationManagementView: View {
                     }
                 }
 
-                Section {
-                    Button("Leave organization…", role: .destructive) {
-                        isLeaveConfirmationPresented = true
-                    }
-                    if store.selectedOrganization?.organizationRole == .owner {
-                        Button("Delete organization…", role: .destructive) {
-                            isDeleteConfirmationPresented = true
+                if canLeaveSelectedOrganization || canDeleteSelectedOrganization {
+                    Section {
+                        if canLeaveSelectedOrganization {
+                            Button("Leave organization…", role: .destructive) {
+                                isLeaveConfirmationPresented = true
+                            }
+                        }
+                        if canDeleteSelectedOrganization {
+                            Button("Delete organization…", role: .destructive) {
+                                isDeleteConfirmationPresented = true
+                            }
                         }
                     }
                 }
@@ -1214,6 +1227,19 @@ private struct OrganizationManagementView: View {
         }
         return callerRole == .owner
             || (callerRole == .admin && invitation.organizationRole == .member)
+    }
+
+    private var canLeaveSelectedOrganization: Bool {
+        guard let organization = store.selectedOrganization else { return false }
+        guard organization.organizationRole == .owner else { return true }
+        return store.organizationMembers.contains {
+            $0.userID != store.session?.userID && $0.organizationRole == .owner
+        }
+    }
+
+    private var canDeleteSelectedOrganization: Bool {
+        guard let organization = store.selectedOrganization else { return false }
+        return organization.organizationRole == .owner && !organization.isFixedWisentOrganization
     }
 }
 

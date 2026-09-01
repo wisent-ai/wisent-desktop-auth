@@ -300,7 +300,7 @@ public final class WisentAuthStore: ObservableObject {
 
     public func selectOrganization(_ organization: WisentOrganization) async {
         guard organizations.contains(where: { $0.id == organization.id }),
-              await ensureFreshSession(),
+              await ensureFreshUserSession(),
               let session else { return }
         do {
             let authorization = try await client.authorizeOrganization(
@@ -350,12 +350,20 @@ public final class WisentAuthStore: ObservableObject {
     }
 
     public func renameOrganization(name: String) async {
+        guard let organization = selectedOrganization else {
+            organizationNote("Select an organization first.")
+            return
+        }
+        guard !organization.isFixedWisentOrganization else {
+            organizationNote("The Wisent organization cannot be modified.")
+            return
+        }
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
             organizationNote("Enter an organization name.")
             return
         }
-        guard selectedOrganization?.organizationRole?.canManageMembers == true else {
+        guard organization.organizationRole?.canManageMembers == true else {
             organizationNote("Only organization owners and admins can rename it.")
             return
         }
@@ -365,12 +373,20 @@ public final class WisentAuthStore: ObservableObject {
     }
 
     public func updateOrganizationSlug(_ slug: String) async {
+        guard let organization = selectedOrganization else {
+            organizationNote("Select an organization first.")
+            return
+        }
+        guard !organization.isFixedWisentOrganization else {
+            organizationNote("The Wisent organization cannot be modified.")
+            return
+        }
         let slug = slug.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !slug.isEmpty else {
             organizationNote("Enter an organization slug.")
             return
         }
-        guard selectedOrganization?.organizationRole == .owner else {
+        guard organization.organizationRole == .owner else {
             organizationNote("Only an organization owner can change its slug.")
             return
         }
@@ -380,13 +396,34 @@ public final class WisentAuthStore: ObservableObject {
     }
 
     public func leaveOrganization() async {
+        guard let organization = selectedOrganization else {
+            organizationNote("Select an organization first.")
+            return
+        }
+        if organization.organizationRole == .owner {
+            let hasAnotherOwner = organizationMembers.contains {
+                $0.userID != session?.userID && $0.organizationRole == .owner
+            }
+            guard hasAnotherOwner else {
+                organizationNote("Transfer ownership before leaving this organization.")
+                return
+            }
+        }
         await performOrganizationLifecycle(preferCurrent: false) { session, organization in
             try await client.leaveOrganization(organization.id, session: session)
         }
     }
 
     public func deleteOrganization() async {
-        guard selectedOrganization?.organizationRole == .owner else {
+        guard let organization = selectedOrganization else {
+            organizationNote("Select an organization first.")
+            return
+        }
+        guard !organization.isFixedWisentOrganization else {
+            organizationNote("The Wisent organization cannot be deleted.")
+            return
+        }
+        guard organization.organizationRole == .owner else {
             organizationNote("Only an organization owner can delete it.")
             return
         }
@@ -574,7 +611,9 @@ public final class WisentAuthStore: ObservableObject {
 
     private func refreshSessionIfNeeded(requiresOrganization: Bool) async -> Bool {
         guard let current = session else { return false }
-        guard current.expiresAt.timeIntervalSinceNow <= Self.refreshLeadTime else { return true }
+        guard current.expiresAt.timeIntervalSinceNow <= Self.refreshLeadTime else {
+            return requiresOrganization ? (status == .ready && selectedOrganization != nil) : true
+        }
         do {
             guard let stored = try await refreshedStoredIdentity() else {
                 transitionToSignedOut()
