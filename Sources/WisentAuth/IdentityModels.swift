@@ -44,6 +44,7 @@ public enum WisentOrganizationRole: String, Codable, Sendable, Equatable, Hashab
     case admin
     case member
 
+    public var canManageMembers: Bool { self == .owner || self == .admin }
 
     public var defaultManagementPermissions: [WisentOrganizationManagementPermission] {
         self == .member ? [] : WisentOrganizationManagementPermission.allCases
