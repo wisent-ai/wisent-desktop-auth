@@ -303,18 +303,11 @@ public final class WisentAuthStore: ObservableObject {
               await ensureFreshUserSession(),
               let session else { return }
         do {
-            let authorization = try await client.authorizeOrganization(
+            _ = try await client.authorizeOrganization(
                 organization.id,
                 session: session
             )
-            selectOrganizationLocally(
-                WisentOrganization(
-                    id: organization.id,
-                    slug: organization.slug,
-                    name: organization.name,
-                    role: authorization.role
-                )
-            )
+            selectOrganizationLocally(organization)
         } catch {
             reportOrganization(error, point: .organizations)
         }
@@ -363,10 +356,6 @@ public final class WisentAuthStore: ObservableObject {
             organizationNote("Enter an organization name.")
             return
         }
-        guard organization.organizationRole?.canManageMembers == true else {
-            organizationNote("Only organization owners and admins can rename it.")
-            return
-        }
         await performOrganizationLifecycle { session, organization in
             try await client.renameOrganization(organization.id, name: name, session: session)
         }
@@ -386,28 +375,15 @@ public final class WisentAuthStore: ObservableObject {
             organizationNote("Enter an organization slug.")
             return
         }
-        guard organization.organizationRole == .owner else {
-            organizationNote("Only an organization owner can change its slug.")
-            return
-        }
         await performOrganizationLifecycle { session, organization in
             try await client.updateOrganizationSlug(organization.id, slug: slug, session: session)
         }
     }
 
     public func leaveOrganization() async {
-        guard let organization = selectedOrganization else {
+        guard selectedOrganization != nil else {
             organizationNote("Select an organization first.")
             return
-        }
-        if organization.organizationRole == .owner {
-            let hasAnotherOwner = organizationMembers.contains {
-                $0.userID != session?.userID && $0.organizationRole == .owner
-            }
-            guard hasAnotherOwner else {
-                organizationNote("Transfer ownership before leaving this organization.")
-                return
-            }
         }
         await performOrganizationLifecycle(preferCurrent: false) { session, organization in
             try await client.leaveOrganization(organization.id, session: session)
@@ -423,21 +399,12 @@ public final class WisentAuthStore: ObservableObject {
             organizationNote("The Wisent organization cannot be deleted.")
             return
         }
-        guard organization.organizationRole == .owner else {
-            organizationNote("Only an organization owner can delete it.")
-            return
-        }
         await performOrganizationLifecycle(preferCurrent: false) { session, organization in
             try await client.deleteOrganization(organization.id, session: session)
         }
     }
 
     public func transferOrganizationOwnership(to member: WisentOrganizationMember) async {
-        guard selectedOrganization?.organizationRole == .owner,
-              member.userID != session?.userID else {
-            organizationNote("Choose another member to receive ownership.")
-            return
-        }
         await performOrganizationLifecycle { session, organization in
             try await client.transferOrganizationOwnership(
                 organization.id,
@@ -491,21 +458,9 @@ public final class WisentAuthStore: ObservableObject {
             organizationNote("Enter a valid email address.")
             return
         }
-        guard let callerRole = selectedOrganization?.organizationRole,
-              callerRole.canManageMembers else {
-            organizationNote("Choose a role allowed by your organization access.")
-            return
-        }
         let role = inviteRole
-        let allowedRoles: [WisentOrganizationRole] = callerRole == .owner
-            ? WisentOrganizationRole.allCases
-            : [.member]
-        guard allowedRoles.contains(role) else {
-            organizationNote("Choose a role allowed by your organization access.")
-            return
-        }
         await performOrganizationOperation { session, organization in
-            try await client.inviteMember(
+            _ = try await client.inviteMember(
                 email: address,
                 role: role,
                 organizationID: organization.id,
@@ -515,13 +470,17 @@ public final class WisentAuthStore: ObservableObject {
         }
     }
 
-    public func cancelOrganizationInvitation(_ invitation: WisentOrganizationInvite) async {
-        guard let callerRole = selectedOrganization?.organizationRole,
-              callerRole == .owner
-                || (callerRole == .admin && invitation.organizationRole == .member) else {
-            organizationNote("Your organization role cannot cancel this invitation.")
-            return
+    public func resendOrganizationInvitation(_ invitation: WisentOrganizationInvite) async {
+        await performOrganizationOperation { session, organization in
+            _ = try await client.resendInvitation(
+                id: invitation.id,
+                organizationID: organization.id,
+                session: session
+            )
         }
+    }
+
+    public func cancelOrganizationInvitation(_ invitation: WisentOrganizationInvite) async {
         await performOrganizationOperation { session, organization in
             try await client.cancelInvitation(
                 id: invitation.id,
@@ -532,12 +491,6 @@ public final class WisentAuthStore: ObservableObject {
     }
 
     public func removeOrganizationMember(_ member: WisentOrganizationMember) async {
-        guard member.userID != session?.userID,
-              let callerRole = selectedOrganization?.organizationRole,
-              callerRole == .owner || (callerRole == .admin && member.organizationRole == .member) else {
-            organizationNote("Your organization role cannot remove this member.")
-            return
-        }
         await performOrganizationOperation { session, organization in
             try await client.removeMember(
                 userID: member.userID,
@@ -552,15 +505,28 @@ public final class WisentAuthStore: ObservableObject {
         _ member: WisentOrganizationMember,
         role: WisentOrganizationRole
     ) async {
-        guard selectedOrganization?.organizationRole == .owner,
-              member.userID != session?.userID else {
-            organizationNote("Only an owner can change another member's role.")
-            return
-        }
         await performOrganizationOperation { session, organization in
             try await client.updateMemberRole(
                 userID: member.userID,
                 role: role,
+                organizationID: organization.id,
+                session: session
+            )
+        }
+    }
+
+    public func updateOrganizationMemberPermissions(
+        _ member: WisentOrganizationMember,
+        permissions: [WisentOrganizationManagementPermission]
+    ) async {
+        let requested = Set(permissions)
+        let exactPermissions = WisentOrganizationManagementPermission.allCases.filter(
+            requested.contains
+        )
+        await performOrganizationOperation { session, organization in
+            try await client.updateMemberPermissions(
+                userID: member.userID,
+                permissions: exactPermissions,
                 organizationID: organization.id,
                 session: session
             )
@@ -768,7 +734,9 @@ public final class WisentAuthStore: ObservableObject {
                 organizationID: organization.id,
                 session: session
             )
-            if organization.canManageMembers {
+            if organization.hasManagementPermission(.membersInvite)
+                || organization.hasManagementPermission(.invitationsCancel)
+            {
                 organizationInvitations = try await client.organizationInvitations(
                     organizationID: organization.id,
                     session: session
@@ -777,7 +745,18 @@ public final class WisentAuthStore: ObservableObject {
                 organizationInvitations = []
             }
         } catch {
+            if case let WisentAuthError.invitationSavedButUndelivered(invitation) = error {
+                upsertOrganizationInvitation(invitation)
+            }
             reportOrganization(error, point: .organizations)
+        }
+    }
+
+    private func upsertOrganizationInvitation(_ invitation: WisentOrganizationInvite) {
+        if let index = organizationInvitations.firstIndex(where: { $0.id == invitation.id }) {
+            organizationInvitations[index] = invitation
+        } else {
+            organizationInvitations.append(invitation)
         }
     }
 

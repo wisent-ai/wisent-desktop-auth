@@ -44,7 +44,28 @@ public enum WisentOrganizationRole: String, Codable, Sendable, Equatable, Hashab
     case admin
     case member
 
-    public var canManageMembers: Bool { self == .owner || self == .admin }
+
+    public var defaultManagementPermissions: [WisentOrganizationManagementPermission] {
+        self == .member ? [] : WisentOrganizationManagementPermission.allCases
+    }
+}
+
+public enum WisentOrganizationManagementPermission: String, Codable, Sendable, Equatable,
+    Hashable, CaseIterable
+{
+    case organizationRename = "organization.rename"
+    case membersInvite = "members.invite"
+    case membersRemove = "members.remove"
+    case invitationsCancel = "invitations.cancel"
+
+    public var label: String {
+        switch self {
+        case .organizationRename: "Rename organization"
+        case .membersInvite: "Invite members"
+        case .membersRemove: "Remove members"
+        case .invitationsCancel: "Cancel invitations"
+        }
+    }
 }
 
 public enum WisentAuthHeader {
@@ -67,21 +88,80 @@ public struct WisentOrganization: Codable, Sendable, Equatable, Identifiable {
     public let slug: String
     public let name: String
     public let role: String
+    public let managementPermissions: [WisentOrganizationManagementPermission]
 
-    public init(id: String, slug: String, name: String, role: String) {
+    public init(
+        id: String,
+        slug: String,
+        name: String,
+        role: String,
+        managementPermissions: [WisentOrganizationManagementPermission]? = nil
+    ) {
         self.id = id
         self.slug = slug
         self.name = name
         self.role = role
+        let organizationRole = WisentOrganizationRole(rawValue: role)
+        self.managementPermissions = organizationRole == .owner
+            ? WisentOrganizationManagementPermission.allCases
+            : managementPermissions ?? organizationRole?.defaultManagementPermissions ?? []
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case slug
+        case name
+        case role
+        case managementPermissions = "management_permissions"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        slug = try values.decode(String.self, forKey: .slug)
+        name = try values.decode(String.self, forKey: .name)
+        role = try values.decode(String.self, forKey: .role)
+        let decodedPermissions = try values.decodeIfPresent(
+            [WisentOrganizationManagementPermission].self,
+            forKey: .managementPermissions
+        )
+        managementPermissions = WisentOrganizationRole(rawValue: role) == .owner
+            ? WisentOrganizationManagementPermission.allCases
+            : decodedPermissions ?? []
     }
 }
 
 public extension WisentOrganization {
     var organizationRole: WisentOrganizationRole? { WisentOrganizationRole(rawValue: role) }
-    var canManageMembers: Bool { organizationRole?.canManageMembers == true }
+    var effectiveManagementPermissions: [WisentOrganizationManagementPermission] {
+        organizationRole == .owner
+            ? WisentOrganizationManagementPermission.allCases
+            : managementPermissions
+    }
+    var canManageMembers: Bool {
+        hasManagementPermission(.membersInvite)
+            || hasManagementPermission(.membersRemove)
+            || hasManagementPermission(.invitationsCancel)
+    }
 
-    init(id: String, slug: String, name: String, role: WisentOrganizationRole) {
-        self.init(id: id, slug: slug, name: name, role: role.rawValue)
+    func hasManagementPermission(_ permission: WisentOrganizationManagementPermission) -> Bool {
+        organizationRole == .owner || managementPermissions.contains(permission)
+    }
+
+    init(
+        id: String,
+        slug: String,
+        name: String,
+        role: WisentOrganizationRole,
+        managementPermissions: [WisentOrganizationManagementPermission]? = nil
+    ) {
+        self.init(
+            id: id,
+            slug: slug,
+            name: name,
+            role: role.rawValue,
+            managementPermissions: managementPermissions ?? role.defaultManagementPermissions
+        )
     }
 }
 
@@ -95,20 +175,69 @@ public struct WisentOrganizationMember: Codable, Sendable, Equatable, Identifiab
     public let userID: String
     public let email: String
     public let role: String
+    public let managementPermissions: [WisentOrganizationManagementPermission]
     public let createdAt: Date?
 
     public var id: String { userID }
+
+    public init(
+        userID: String,
+        email: String,
+        role: String,
+        managementPermissions: [WisentOrganizationManagementPermission]? = nil,
+        createdAt: Date? = nil
+    ) {
+        self.userID = userID
+        self.email = email
+        self.role = role
+        let organizationRole = WisentOrganizationRole(rawValue: role)
+        self.managementPermissions = organizationRole == .owner
+            ? WisentOrganizationManagementPermission.allCases
+            : managementPermissions ?? organizationRole?.defaultManagementPermissions ?? []
+        self.createdAt = createdAt
+    }
 
     enum CodingKeys: String, CodingKey {
         case userID = "user_id"
         case email
         case role
+        case managementPermissions = "management_permissions"
         case createdAt = "created_at"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        userID = try values.decode(String.self, forKey: .userID)
+        email = try values.decode(String.self, forKey: .email)
+        role = try values.decode(String.self, forKey: .role)
+        let decodedPermissions = try values.decodeIfPresent(
+            [WisentOrganizationManagementPermission].self,
+            forKey: .managementPermissions
+        )
+        managementPermissions = WisentOrganizationRole(rawValue: role) == .owner
+            ? WisentOrganizationManagementPermission.allCases
+            : decodedPermissions ?? []
+        createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt)
     }
 }
 
 public extension WisentOrganizationMember {
     var organizationRole: WisentOrganizationRole? { WisentOrganizationRole(rawValue: role) }
+    var effectiveManagementPermissions: [WisentOrganizationManagementPermission] {
+        organizationRole == .owner
+            ? WisentOrganizationManagementPermission.allCases
+            : managementPermissions
+    }
+
+    func hasManagementPermission(_ permission: WisentOrganizationManagementPermission) -> Bool {
+        organizationRole == .owner || managementPermissions.contains(permission)
+    }
+}
+
+public enum WisentInvitationDeliveryStatus: String, Codable, Sendable, Equatable, Hashable {
+    case pending
+    case sent
+    case failed
 }
 
 public struct WisentOrganizationInvite: Codable, Sendable, Equatable, Identifiable {
@@ -117,12 +246,43 @@ public struct WisentOrganizationInvite: Codable, Sendable, Equatable, Identifiab
     public let role: String
     public let expiresAt: Date?
     public let createdAt: Date?
+    public let deliveryID: String?
+    public let deliveryStatus: WisentInvitationDeliveryStatus
+    public let deliveryAttempts: Int
+    public let deliveredAt: Date?
+    public let providerMessageID: String?
+    public let lastDeliveryError: String?
+
     enum CodingKeys: String, CodingKey {
         case id
         case email
         case role
         case expiresAt = "expires_at"
         case createdAt = "created_at"
+        case deliveryID = "delivery_id"
+        case deliveryStatus = "delivery_status"
+        case deliveryAttempts = "delivery_attempts"
+        case deliveredAt = "delivered_at"
+        case providerMessageID = "provider_message_id"
+        case lastDeliveryError = "last_delivery_error"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        email = try values.decode(String.self, forKey: .email)
+        role = try values.decode(String.self, forKey: .role)
+        expiresAt = try values.decodeIfPresent(Date.self, forKey: .expiresAt)
+        createdAt = try values.decodeIfPresent(Date.self, forKey: .createdAt)
+        deliveryID = try values.decodeIfPresent(String.self, forKey: .deliveryID)
+        deliveryStatus = try values.decodeIfPresent(
+            WisentInvitationDeliveryStatus.self,
+            forKey: .deliveryStatus
+        ) ?? .pending
+        deliveryAttempts = try values.decodeIfPresent(Int.self, forKey: .deliveryAttempts) ?? 0
+        deliveredAt = try values.decodeIfPresent(Date.self, forKey: .deliveredAt)
+        providerMessageID = try values.decodeIfPresent(String.self, forKey: .providerMessageID)
+        lastDeliveryError = try values.decodeIfPresent(String.self, forKey: .lastDeliveryError)
     }
 }
 
@@ -273,6 +433,7 @@ enum WisentAuthError: LocalizedError {
     case webAuthenticationTimedOut
     case oauthRejected(String)
     case organizationRefusal(WisentOrganizationRefusal)
+    case invitationSavedButUndelivered(WisentOrganizationInvite)
 
     var point: WisentFailurePoint {
         switch self {
@@ -280,7 +441,7 @@ enum WisentAuthError: LocalizedError {
         case let .invalidResponse(point): point
         case let .http(_, point): point
         case .malformedSession: .session
-        case .noOrganization, .organizationRefusal: .organizations
+        case .noOrganization, .organizationRefusal, .invitationSavedButUndelivered: .organizations
         case .keychain: .storage
         case .webAuthenticationTimedOut: .oauthAuthorize
         case .oauthRejected: .oauthCallback
@@ -300,6 +461,8 @@ enum WisentAuthError: LocalizedError {
             .config
         case .organizationRefusal:
             .notFound
+        case .invitationSavedButUndelivered:
+            .infraDown
         case let .http(response, point):
             WisentFailureClassifier.code(for: response, service: point.service)
         case .invalidResponse, .malformedSession:
@@ -324,6 +487,8 @@ enum WisentAuthError: LocalizedError {
             "This account isn't attached to any organization yet. Create one or contact support."
         case let .organizationRefusal(refusal):
             refusal.userMessage
+        case .invitationSavedButUndelivered:
+            "Invitation was saved, but its email was not delivered. Retry it below."
         case .keychain:
             "Your sign-in couldn't be stored securely on this Mac. Try again, and check your keychain if it keeps failing."
         case .webAuthenticationTimedOut:
@@ -350,6 +515,8 @@ enum WisentAuthError: LocalizedError {
             "no organization rows visible during organization resolution"
         case let .organizationRefusal(refusal):
             "organization rpc refusal: \(refusal.rawValue)"
+        case let .invitationSavedButUndelivered(invitation):
+            "invitation \(invitation.id) persisted with delivery status \(invitation.deliveryStatus.rawValue)"
         case let .keychain(status):
             "keychain osstatus \(status)"
         case .webAuthenticationTimedOut:
@@ -381,6 +548,7 @@ struct OrganizationAuthorizationRow: Decodable, Sendable {
         case role
     }
 }
+
 struct MembershipRow: Decodable, Sendable {
     struct Organization: Decodable, Sendable {
         let id: String
@@ -390,12 +558,28 @@ struct MembershipRow: Decodable, Sendable {
 
     let organizationID: String
     let role: WisentOrganizationRole
+    let managementPermissions: [WisentOrganizationManagementPermission]
     let organization: Organization
 
     enum CodingKeys: String, CodingKey {
         case organizationID = "org_id"
         case role
+        case managementPermissions = "management_permissions"
         case organization = "organizations"
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        organizationID = try values.decode(String.self, forKey: .organizationID)
+        role = try values.decode(WisentOrganizationRole.self, forKey: .role)
+        let decodedPermissions = try values.decodeIfPresent(
+            [WisentOrganizationManagementPermission].self,
+            forKey: .managementPermissions
+        )
+        managementPermissions = role == .owner
+            ? WisentOrganizationManagementPermission.allCases
+            : decodedPermissions ?? []
+        organization = try values.decode(Organization.self, forKey: .organization)
     }
 
     var value: WisentOrganization {
@@ -403,7 +587,8 @@ struct MembershipRow: Decodable, Sendable {
             id: organizationID,
             slug: organization.slug,
             name: organization.name,
-            role: role
+            role: role,
+            managementPermissions: managementPermissions
         )
     }
 }
