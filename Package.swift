@@ -20,11 +20,15 @@ let package = Package(
         // last tag that predated this dependency.
         .package(url: "https://github.com/wisent-ai/echo.git", from: "0.1.2"),
         .package(url: "https://github.com/wisent-ai/wisent-components.git", exact: "0.8.1"),
-        // The fleet's failure catalogue, pinned to a commit rather than a range:
-        // there is only one vocabulary if every consumer names the same one.
+        // The fleet's failure catalogue, named by exact version rather than by a
+        // commit: there is only one vocabulary if every consumer names the same
+        // one, and a version is the spelling a reader can compare at a glance.
+        // It is taggable because it declares no dependencies of its own, and tag
+        // 1.0.0 points at b01a0c99 — the very commit the fleet already resolved,
+        // so this names the same tree it always did.
         .package(
             url: "https://github.com/wisent-ai/wisent-errors",
-            revision: "b01a0c99766b5c6378ecdbf3921108420ba058f1"
+            exact: "1.0.0"
         ),
     ],
     targets: [
