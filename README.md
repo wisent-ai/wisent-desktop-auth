@@ -12,12 +12,13 @@
 
 One Sign-In for Every Wisent App on Your Mac.
 
-Ten desktop applications means ten login screens, ten Keychain bugs and ten
-different ways a session dies on a Monday morning. Wisent Desktop Auth is the one
-Swift package they all share: sign-in, organization selection, member management,
-session refresh and the Keychain persistence underneath. Failures come back
-classified, so an app can tell an expired session from a network problem from a
-revoked seat. Add the package and the login screen is already finished.
+A growing fleet of desktop applications otherwise means a growing collection of
+login screens, Keychain bugs and different ways a session dies on a Monday
+morning. Wisent Desktop Auth is the one Swift package they share: sign-in,
+organization selection, member management, session refresh and the Keychain
+persistence underneath. Failures come back classified, so an app can tell an
+expired session from a network problem from a revoked seat. Add the package and
+the login screen is already finished.
 
 Sign In Once. Everywhere.
 
@@ -44,10 +45,11 @@ Wisent Desktop Auth serves:
 
 - **Wisent macOS application developers** embedding a standard SwiftUI identity
   gate;
-- **organization members** signing in by email OTP, Google, or GitHub and choosing
-  the organization in which the host app will operate;
-- **organization owners/admins** viewing membership and managing invitations,
-  roles, and removals through approved Supabase RPCs;
+- **organization members** signing in by email OTP, Apple, Google, or GitHub and
+  choosing the organization in which the host app will operate;
+- **organization owners/admins** creating, renaming, switching and managing
+  organizations, invitations, members, roles and ownership through approved
+  Supabase RPCs;
 - **operators** relying on a stable failure taxonomy and private diagnostics when
   identity infrastructure fails.
 
@@ -61,20 +63,26 @@ Wisent Desktop Auth serves:
 - reusable `WisentAuthGate` SwiftUI view and account/organization UI;
 - `WisentAuthStore` observable state machine;
 - email one-time-code request and verification;
-- optional Google and GitHub OAuth via `ASWebAuthenticationSession` with PKCE;
-- session restoration, refresh before expiry, and sign-out;
-- organization discovery/bootstrap, invitation review, and selection;
-- member/invitation listing plus owner/admin management operations;
+- optional Apple, Google and GitHub OAuth via `ASWebAuthenticationSession` with
+  PKCE;
+- session restoration, refresh before expiry, sign-out, and live cross-process
+  propagation of shared session and organization changes;
+- organization creation, discovery, rename, slug update, selection, switching,
+  leaving, deletion and ownership transfer;
+- invitation review plus member/invitation listing and role management;
 - shared access and refresh token persistence in macOS Keychain, with one-time
   migration from each host's former bundle-scoped session;
 - classified user-safe failures and separately logged operator diagnostics.
 
 ### Explicit non-goals and limitations
 
-- Authentication is not authorization. Every host service must validate the
-  bearer token and enforce organization/resource authorization server-side.
+- Authentication is not authorization. Organization-scoped host requests use
+  `Authorization: Bearer <Supabase JWT>` and
+  `X-Wisent-Organization-ID: <uuid>`; every host service must validate both and
+  verify membership server-side.
 - `WisentOrganization.canManageMembers` is a UI capability hint derived from the
-  returned role; Supabase RPCs/RLS remain the enforcement boundary.
+  returned `WisentOrganizationRole`; Supabase RPCs/RLS remain the enforcement
+  boundary.
 - The package does not own product plans, entitlements, checkout, subscription
   state, usage metering, or feature gates.
 - It does not store or broker model-provider, workload, browser-workflow, payment,
@@ -95,6 +103,7 @@ Wisent Desktop Auth serves:
 
 | Path | Client behavior | External requirement |
 |---|---|---|
+| Apple OAuth | browser session with PKCE callback | configured Supabase provider and URL scheme |
 | Email OTP | request code, verify code, persist session | Supabase email auth/delivery |
 | Google OAuth | browser session with PKCE callback | configured Supabase provider and URL scheme |
 | GitHub OAuth | browser session with PKCE callback | configured Supabase provider and URL scheme |
@@ -118,20 +127,25 @@ OAuth can be disabled with `WISENT_AUTH_OAUTH_ENABLED=0` while retaining email O
 
 - **Actor:** a returning local user.
 - **Initial state:** this app bundle has a stored Keychain identity.
-- **Outcome:** a sufficiently fresh session is restored, or a near-expiry session
-  is refreshed before organization resolution.
+- **Outcome:** a sufficiently fresh shared session is restored, or a near-expiry
+  session is refreshed after re-reading the Keychain item so another process's
+  rotated refresh token is never deliberately reused. Session, organization
+  switch and sign-out changes propagate live between Wisent apps through macOS
+  distributed notifications.
 - **Boundary:** an authentication rejection clears the invalid session; transient
   infrastructure failure is classified rather than deliberately erasing it.
 
-### Manage organization membership
+### Manage the organization lifecycle
 
-- **Actor:** a selected-organization owner or admin.
-- **Initial state:** server-returned role allows management and the session is
-  fresh.
-- **Outcome:** the user can inspect members/invitations and invoke invite, cancel,
-  remove, or role-update RPCs.
-- **Boundary:** server authorization is authoritative; client visibility cannot
-  grant permission.
+- **Actor:** a selected-organization member, admin or owner.
+- **Initial state:** the server-returned membership role allows the requested
+  operation and the session is fresh.
+- **Outcome:** users can create, reload, switch and leave organizations; admins
+  can rename and manage members within their matrix; owners can additionally
+  change slugs, transfer ownership and delete. Invitation acceptance is optional
+  when the user already has a membership.
+- **Boundary:** `WisentOrganizationRole` drives presentation, but server
+  authorization is authoritative; client visibility cannot grant permission.
 
 ## How it works
 
@@ -145,6 +159,7 @@ Host SwiftUI application
           ├─ Supabase Auth REST (OTP, OAuth/PKCE, refresh, logout)
           ├─ Supabase REST/RPC (organizations, invites, members)
           ├─ macOS Keychain (stored session + selected organization ID)
+          ├─ macOS distributed notifications (session/org/sign-out propagation)
           └─ WisentFailureClassifier (safe UI message + operator log)
                          │
                          ▼
@@ -254,8 +269,8 @@ let auth = WisentAuthStore(productName: "Weles")
 Public observable state includes status, session, organization list/selection,
 identity, busy flags, pending invitations, management lists, and classified
 failures. Public operations cover start, OTP/OAuth sign-in, email change,
-organization selection/invitation review, organization management, failure
-clearing, and sign-out.
+organization creation/reload/switch/rename/slug/leave/delete/ownership transfer,
+invitation and member management, failure retry, and sign-out.
 
 Do not copy the access token into app preferences, logs, crash metadata, or UI.
 Use it only for authorized requests to the host product service.
@@ -281,8 +296,24 @@ presentation. Host content remains application-owned.
 A ready identity exposes:
 
 - user ID and email;
-- selected organization ID, slug, name, and role;
+- selected organization ID, slug, name, raw compatibility role, and typed
+  `organization.organizationRole: WisentOrganizationRole?`;
 - current access token.
+
+Authorize an organization-scoped product request without constructing a header
+dictionary:
+
+```swift
+guard let identity else { return }
+var request = URLRequest(url: endpoint)
+identity.authorize(&request)
+```
+
+This writes exactly `Authorization: Bearer <Supabase JWT>` and
+`X-Wisent-Organization-ID: <uuid>`. User-owned resources remain user-scoped;
+services must not infer organization ownership for them. Workload and service
+tokens are not human login sessions and must not be wrapped in a manufactured
+`WisentIdentity` or organization context.
 
 Absence means the protected content is outside a ready identity state; do not
 manufacture an anonymous/product fallback.
@@ -298,6 +329,9 @@ The public convenience initializer uses:
 | `WISENT_AUTH_CALLBACK_SCHEME` | app URL callback scheme | host bundle identifier |
 | `WISENT_AUTH_REDIRECT_URL` | OAuth redirect URL | `<scheme>://auth-callback` |
 | `WISENT_AUTH_OAUTH_ENABLED` | OAuth presentation | enabled unless exactly `0` |
+
+The canonical production identity URL is
+`https://alvaewvbyxpgwdpugnxy.supabase.co`.
 
 The Supabase anon key identifies the public client; it is not a service-role
 secret. Never put a service-role key into this client package or host app.
@@ -322,19 +356,25 @@ the classified failure rather than parsing text in `errorMessage`.
   provisioning profile.
 - Keychain storage protects persistence; it does not prevent a compromised host
   process from reading the public in-memory identity/access token.
-- The default session begins refresh five minutes before expiry. Servers must
-  still validate every request and handle revocation/expiry.
+- The default shared session begins refresh five minutes before expiry. The
+  store re-reads the Keychain item immediately before refresh so it does not use
+  a token already rotated by another process. Servers must still validate every
+  request and handle revocation/expiry.
+- Session replacement, organization switching and sign-out are propagated
+  between running Wisent apps with a system distributed notification. The
+  notification contains no token or other secret; recipients re-read Keychain.
 - OAuth uses `ASWebAuthenticationSession`, a five-minute client timeout, and PKCE
   S256. Callback scheme/provider registration must exactly match the host.
 - Email addresses, user IDs, organization metadata, invitations, membership,
   roles, access tokens, and refresh tokens are sensitive identity data.
 - Do not log tokens, upstream response bodies, invitation tokens, or full request
   headers. Restrict operator logs and retention.
-- Supabase RLS and RPC authorization must fail closed. UI role checks and selected
-  organization IDs are attacker-controlled client input.
+- Supabase RLS and `authorize_organization(target_org_id uuid)` must fail closed.
+  UI role checks, selected organization IDs and request headers are
+  attacker-controlled client input.
 - Share only the user's Wisent identity session. Provider, workload, browser,
-  payment, and customer-resource credentials remain outside the shared store and
-  under their owning product or Skarbiec boundary.
+  payment, customer-resource and service credentials remain outside the shared
+  store and under their owning product or Skarbiec boundary.
 - Production hosts must package and sign the fixed-identifier helper. Source-only
   and incomplete bundles intentionally fall back to isolated, bundle-scoped
   storage.

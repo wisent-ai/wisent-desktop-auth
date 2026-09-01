@@ -39,6 +39,19 @@ public struct WisentAuthConfiguration: Sendable, Equatable {
     }
 }
 
+public enum WisentOrganizationRole: String, Codable, Sendable, Equatable, Hashable, CaseIterable {
+    case owner
+    case admin
+    case member
+
+    public var canManageMembers: Bool { self == .owner || self == .admin }
+}
+
+public enum WisentAuthHeader {
+    public static let authorization = "Authorization"
+    public static let organizationID = "X-Wisent-Organization-ID"
+}
+
 public struct WisentSession: Codable, Sendable, Equatable {
     public let accessToken: String
     public let refreshToken: String
@@ -64,7 +77,12 @@ public struct WisentOrganization: Codable, Sendable, Equatable, Identifiable {
 }
 
 public extension WisentOrganization {
-    var canManageMembers: Bool { role == "owner" || role == "admin" }
+    var organizationRole: WisentOrganizationRole? { WisentOrganizationRole(rawValue: role) }
+    var canManageMembers: Bool { organizationRole?.canManageMembers == true }
+
+    init(id: String, slug: String, name: String, role: WisentOrganizationRole) {
+        self.init(id: id, slug: slug, name: name, role: role.rawValue)
+    }
 }
 
 public struct WisentOrganizationMember: Codable, Sendable, Equatable, Identifiable {
@@ -83,6 +101,10 @@ public struct WisentOrganizationMember: Codable, Sendable, Equatable, Identifiab
     }
 }
 
+public extension WisentOrganizationMember {
+    var organizationRole: WisentOrganizationRole? { WisentOrganizationRole(rawValue: role) }
+}
+
 public struct WisentOrganizationInvite: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public let email: String
@@ -96,6 +118,10 @@ public struct WisentOrganizationInvite: Codable, Sendable, Equatable, Identifiab
         case expiresAt = "expires_at"
         case createdAt = "created_at"
     }
+}
+
+public extension WisentOrganizationInvite {
+    var organizationRole: WisentOrganizationRole? { WisentOrganizationRole(rawValue: role) }
 }
 
 public struct WisentUserInvite: Codable, Sendable, Equatable, Identifiable {
@@ -116,6 +142,10 @@ public struct WisentUserInvite: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+public extension WisentUserInvite {
+    var organizationRole: WisentOrganizationRole? { WisentOrganizationRole(rawValue: role) }
+}
+
 public struct WisentIdentity: Sendable, Equatable {
     public let userID: String
     public let email: String
@@ -127,6 +157,70 @@ public struct WisentIdentity: Sendable, Equatable {
         self.email = email
         self.organization = organization
         self.accessToken = accessToken
+    }
+}
+
+public extension WisentIdentity {
+    func authorize(_ request: inout URLRequest) {
+
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: WisentAuthHeader.authorization)
+        request.setValue(organization.id, forHTTPHeaderField: WisentAuthHeader.organizationID)
+    }
+
+    func authorized(_ request: URLRequest) -> URLRequest {
+        var request = request
+        authorize(&request)
+        return request
+    }
+}
+enum WisentOrganizationRefusal: String, Sendable {
+    case notAuthenticated = "not authenticated"
+    case noMembership = "no organization membership"
+    case insufficientRole = "insufficient organization role"
+    case transferBeforeLeaving = "transfer ownership before leaving the organization"
+    case ownersOnlyTransfer = "only owners can transfer ownership"
+    case targetNotMember = "target member does not belong to the organization"
+    case wisentOrganizationImmutable = "the Wisent organization cannot be modified"
+    case wisentOrganizationNotDeletable = "the Wisent organization cannot be deleted"
+    case invalidName = "organization name is invalid"
+    case invalidSlug = "organization slug is invalid"
+    case slugInUse = "organization slug is already in use"
+    case invalidEmail = "email is invalid"
+    case emailAlreadyMember = "email is already a member of this organization"
+    case invalidRole = "invalid organization role"
+    case invalidInvite = "invalid or expired invite"
+
+    var userMessage: String {
+        switch self {
+        case .notAuthenticated:
+            "Your session has expired. Sign in again to continue."
+        case .noMembership:
+            "You no longer have access to this organization."
+        case .insufficientRole, .ownersOnlyTransfer:
+            "Your organization role does not allow this action."
+        case .transferBeforeLeaving:
+            "Transfer ownership before leaving this organization."
+        case .targetNotMember:
+            "That person is no longer a member of this organization."
+        case .wisentOrganizationImmutable:
+            "The Wisent organization cannot be modified."
+        case .wisentOrganizationNotDeletable:
+            "The Wisent organization cannot be deleted."
+        case .invalidName:
+            "Enter a valid organization name."
+        case .invalidSlug:
+            "Enter a valid organization slug."
+        case .slugInUse:
+            "That organization slug is already in use."
+        case .invalidEmail:
+            "Enter a valid email address."
+        case .emailAlreadyMember:
+            "That email is already a member of this organization."
+        case .invalidRole:
+            "Choose a valid organization role."
+        case .invalidInvite:
+            "That invitation is invalid or has expired."
+        }
     }
 }
 
@@ -172,6 +266,7 @@ enum WisentAuthError: LocalizedError {
     case keychain(OSStatus)
     case webAuthenticationTimedOut
     case oauthRejected(String)
+    case organizationRefusal(WisentOrganizationRefusal)
 
     var point: WisentFailurePoint {
         switch self {
@@ -179,7 +274,7 @@ enum WisentAuthError: LocalizedError {
         case let .invalidResponse(point): point
         case let .http(_, point): point
         case .malformedSession: .session
-        case .noOrganization: .organizations
+        case .noOrganization, .organizationRefusal: .organizations
         case .keychain: .storage
         case .webAuthenticationTimedOut: .oauthAuthorize
         case .oauthRejected: .oauthCallback
@@ -197,6 +292,8 @@ enum WisentAuthError: LocalizedError {
         switch self {
         case .notConfigured, .malformedURL, .noOrganization:
             .config
+        case .organizationRefusal:
+            .notFound
         case let .http(response, point):
             WisentFailureClassifier.code(for: response, service: point.service)
         case .invalidResponse, .malformedSession:
@@ -218,7 +315,9 @@ enum WisentAuthError: LocalizedError {
     var specificMessage: String? {
         switch self {
         case .noOrganization:
-            "This account isn't attached to any organization yet. This is a problem on our side — please contact support."
+            "This account isn't attached to any organization yet. Create one or contact support."
+        case let .organizationRefusal(refusal):
+            refusal.userMessage
         case .keychain:
             "Your sign-in couldn't be stored securely on this Mac. Try again, and check your keychain if it keeps failing."
         case .webAuthenticationTimedOut:
@@ -242,7 +341,9 @@ enum WisentAuthError: LocalizedError {
         case .malformedSession:
             "session payload missing access_token, refresh_token or user id"
         case .noOrganization:
-            "no organization rows visible after bootstrap"
+            "no organization rows visible during organization resolution"
+        case let .organizationRefusal(refusal):
+            "organization rpc refusal: \(refusal.rawValue)"
         case let .keychain(status):
             "keychain osstatus \(status)"
         case .webAuthenticationTimedOut:
@@ -262,6 +363,18 @@ struct StoredIdentity: Codable, Sendable, Equatable {
     var selectedOrganizationID: String?
 }
 
+
+struct OrganizationAuthorizationRow: Decodable, Sendable {
+    let userID: String
+    let organizationID: String
+    let role: WisentOrganizationRole
+
+    enum CodingKeys: String, CodingKey {
+        case userID = "user_id"
+        case organizationID = "organization_id"
+        case role
+    }
+}
 struct MembershipRow: Decodable, Sendable {
     struct Organization: Decodable, Sendable {
         let id: String
@@ -270,7 +383,7 @@ struct MembershipRow: Decodable, Sendable {
     }
 
     let organizationID: String
-    let role: String
+    let role: WisentOrganizationRole
     let organization: Organization
 
     enum CodingKeys: String, CodingKey {

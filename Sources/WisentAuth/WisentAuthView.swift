@@ -51,6 +51,7 @@ public extension EnvironmentValues {
 public struct WisentAuthGate<Content: View>: View {
     @ObservedObject private var store: WisentAuthStore
     @State private var isOrganizationManagerPresented = false
+    @State private var isInvitationReviewPresented = false
     private let content: () -> Content
 
     public init(store: WisentAuthStore, @ViewBuilder content: @escaping () -> Content) {
@@ -85,6 +86,9 @@ public struct WisentAuthGate<Content: View>: View {
         .sheet(isPresented: $isOrganizationManagerPresented) {
             OrganizationManagementView(store: store)
         }
+        .sheet(isPresented: $isInvitationReviewPresented) {
+            OrganizationInvitationReviewView(store: store)
+        }
     }
 
     private var organizationLoadingView: some View {
@@ -116,11 +120,23 @@ public struct WisentAuthGate<Content: View>: View {
                         .accessibilityIdentifier("wisent.auth.manage-organization")
                     }
                 }
+                if !store.pendingInvitations.isEmpty {
+                    Section("Invitations") {
+                        Button {
+                            isInvitationReviewPresented = true
+                        } label: {
+                            Label(
+                                "Review \(store.pendingInvitations.count) invitation\(store.pendingInvitations.count == 1 ? "" : "s")…",
+                                systemImage: "envelope.badge"
+                            )
+                        }
+                    }
+                }
                 if store.organizations.count > 1 {
                     Section("Switch organization") {
                         ForEach(store.organizations) { organization in
                             Button {
-                                store.selectOrganization(organization)
+                                Task { await store.selectOrganization(organization) }
                             } label: {
                                 if organization.id == store.selectedOrganization?.id {
                                     Label(organization.name, systemImage: "checkmark")
@@ -754,17 +770,19 @@ private func hubotSemibold(_ size: CGFloat) -> Font {
 
 private struct OrganizationPickerView: View {
     @ObservedObject var store: WisentAuthStore
+    @State private var organizationName = ""
+    @State private var organizationSlug = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Label("Choose an organization", systemImage: "building.2")
                 .font(.title2.bold())
-            Text("Your permissions and data are scoped to the selected organization.")
+            Text("Your permissions and organization data are scoped to this selection.")
                 .foregroundStyle(.secondary)
 
             ForEach(store.organizations) { organization in
                 Button {
-                    store.selectOrganization(organization)
+                    Task { await store.selectOrganization(organization) }
                 } label: {
                     HStack {
                         VStack(alignment: .leading, spacing: 3) {
@@ -788,6 +806,39 @@ private struct OrganizationPickerView: View {
                 .accessibilityIdentifier("wisent.auth.organization.\(organization.id)")
             }
 
+            GroupBox(store.organizations.isEmpty ? "Create your organization" : "Create another") {
+                VStack(alignment: .leading, spacing: 10) {
+                    TextField("Organization name", text: $organizationName)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("wisent.auth.create-organization-name")
+                    HStack {
+                        TextField("organization-slug", text: $organizationSlug)
+                            .textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier("wisent.auth.create-organization-slug")
+                        Button("Create") {
+                            Task {
+                                await store.createOrganization(
+                                    name: organizationName,
+                                    slug: organizationSlug
+                                )
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .accessibilityIdentifier("wisent.auth.create-organization")
+                    }
+                }
+                .padding(.top, 4)
+            }
+
+            if let error = store.organizationError {
+                WisentFailureBanner(
+                    message: error,
+                    failure: store.organizationFailure,
+                    identifier: "wisent.auth.organization-create-error",
+                    retry: { await store.reloadOrganizations() }
+                )
+            }
+
             HStack {
                 Text(store.session?.email ?? "")
                     .font(.caption)
@@ -797,20 +848,26 @@ private struct OrganizationPickerView: View {
             }
         }
         .padding(40)
-        .frame(minWidth: 560, minHeight: 420)
+        .frame(minWidth: 560, minHeight: 520)
+        .disabled(store.isOrganizationBusy)
         .accessibilityIdentifier("wisent.auth.organization-picker")
     }
 }
 
 private struct OrganizationInvitationReviewView: View {
     @ObservedObject var store: WisentAuthStore
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Label("Organization invitations", systemImage: "envelope.badge")
                 .font(.title2.bold())
-            Text("Review invitations before continuing to your Wisent workspace.")
-                .foregroundStyle(.secondary)
+            Text(
+                store.selectedOrganization == nil
+                    ? "Accept an invitation or create an organization to continue."
+                    : "You can review these now or continue in your current organization."
+            )
+            .foregroundStyle(.secondary)
 
             ForEach(store.pendingInvitations) { invitation in
                 VStack(alignment: .leading, spacing: 10) {
@@ -858,6 +915,9 @@ private struct OrganizationInvitationReviewView: View {
             }
 
             HStack {
+                if store.selectedOrganization != nil {
+                    Button("Continue to workspace") { dismiss() }
+                }
                 Text(store.session?.email ?? "")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -875,9 +935,12 @@ private struct OrganizationInvitationReviewView: View {
 private struct OrganizationManagementView: View {
     @ObservedObject var store: WisentAuthStore
     @Environment(\.dismiss) private var dismiss
+    @State private var organizationName = ""
+    @State private var organizationSlug = ""
     @State private var memberPendingRemoval: WisentOrganizationMember?
-
-    private let roles = ["owner", "admin", "member"]
+    @State private var memberPendingOwnershipTransfer: WisentOrganizationMember?
+    @State private var isLeaveConfirmationPresented = false
+    @State private var isDeleteConfirmationPresented = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -885,7 +948,7 @@ private struct OrganizationManagementView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(store.selectedOrganization?.name ?? "Organization")
                         .font(.title2.bold())
-                    Text("Team and access")
+                    Text("Organization, team and access")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -899,6 +962,33 @@ private struct OrganizationManagementView: View {
 
             Divider()
 
+            if store.selectedOrganization?.organizationRole?.canManageMembers == true {
+                GroupBox("Organization details") {
+                    VStack(spacing: 10) {
+                        HStack {
+                            TextField("Organization name", text: $organizationName)
+                                .textFieldStyle(.roundedBorder)
+                            Button("Save name") {
+                                Task { await store.renameOrganization(name: organizationName) }
+                            }
+                        }
+                        HStack {
+                            TextField("organization-slug", text: $organizationSlug)
+                                .textFieldStyle(.roundedBorder)
+                                .disabled(store.selectedOrganization?.organizationRole != .owner)
+                            if store.selectedOrganization?.organizationRole == .owner {
+                                Button("Save slug") {
+                                    Task { await store.updateOrganizationSlug(organizationSlug) }
+                                }
+                            }
+                        }
+                    }
+                    .padding(.top, 4)
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 14)
+            }
+
             if let organization = store.selectedOrganization, organization.canManageMembers {
                 GroupBox("Invite a teammate") {
                     HStack(spacing: 10) {
@@ -906,8 +996,8 @@ private struct OrganizationManagementView: View {
                             .textFieldStyle(.roundedBorder)
                             .accessibilityIdentifier("wisent.auth.invite-email")
                         Picker("Role", selection: $store.inviteRole) {
-                            ForEach(availableRoles, id: \.self) { role in
-                                Text(role.capitalized).tag(role)
+                            ForEach(availableInviteRoles, id: \.self) { role in
+                                Text(role.rawValue.capitalized).tag(role)
                             }
                         }
                         .labelsHidden()
@@ -954,15 +1044,29 @@ private struct OrganizationManagementView: View {
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
                                 .background(.secondary.opacity(0.12), in: Capsule())
-                            if canEdit(member) {
+                            if canManage(member) {
                                 Menu {
-                                    ForEach(availableRoles, id: \.self) { role in
-                                        Button(role.capitalized) {
-                                            Task {
-                                                await store.updateOrganizationMemberRole(member, role: role)
+                                    if store.selectedOrganization?.organizationRole == .owner {
+                                        ForEach(
+                                            [WisentOrganizationRole.admin, .member],
+                                            id: \.self
+                                        ) { role in
+                                            Button("Make \(role.rawValue)") {
+                                                Task {
+                                                    await store.updateOrganizationMemberRole(
+                                                        member,
+                                                        role: role
+                                                    )
+                                                }
+                                            }
+                                            .disabled(role == member.organizationRole)
+                                        }
+                                        if member.organizationRole != .owner {
+                                            Divider()
+                                            Button("Transfer ownership…") {
+                                                memberPendingOwnershipTransfer = member
                                             }
                                         }
-                                        .disabled(role == member.role)
                                     }
                                     Divider()
                                     Button("Remove member…", role: .destructive) {
@@ -995,11 +1099,26 @@ private struct OrganizationManagementView: View {
                                         .font(.caption2)
                                         .foregroundStyle(.tertiary)
                                 }
-                                Button("Cancel", role: .destructive) {
-                                    Task { await store.cancelOrganizationInvitation(invitation) }
+                                if canCancel(invitation) {
+                                    Button("Cancel", role: .destructive) {
+                                        Task {
+                                            await store.cancelOrganizationInvitation(invitation)
+                                        }
+                                    }
                                 }
                             }
                             .accessibilityIdentifier("wisent.auth.pending-invitation.\(invitation.id)")
+                        }
+                    }
+                }
+
+                Section {
+                    Button("Leave organization…", role: .destructive) {
+                        isLeaveConfirmationPresented = true
+                    }
+                    if store.selectedOrganization?.organizationRole == .owner {
+                        Button("Delete organization…", role: .destructive) {
+                            isDeleteConfirmationPresented = true
                         }
                     }
                 }
@@ -1011,9 +1130,13 @@ private struct OrganizationManagementView: View {
                 }
             }
         }
-        .frame(minWidth: 720, minHeight: 560)
+        .frame(minWidth: 720, minHeight: 680)
         .disabled(store.isOrganizationBusy)
-        .task { await store.loadOrganizationManagement() }
+        .task {
+            organizationName = store.selectedOrganization?.name ?? ""
+            organizationSlug = store.selectedOrganization?.slug ?? ""
+            await store.loadOrganizationManagement()
+        }
         .alert(
             "Remove member?",
             isPresented: Binding(
@@ -1029,18 +1152,68 @@ private struct OrganizationManagementView: View {
         } message: { member in
             Text("\(member.email) will lose access to this organization.")
         }
+        .alert(
+            "Transfer ownership?",
+            isPresented: Binding(
+                get: { memberPendingOwnershipTransfer != nil },
+                set: { if !$0 { memberPendingOwnershipTransfer = nil } }
+            ),
+            presenting: memberPendingOwnershipTransfer
+        ) { member in
+            Button("Transfer", role: .destructive) {
+                Task { await store.transferOrganizationOwnership(to: member) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { member in
+            Text("\(member.email) will become an owner and your role will become admin.")
+        }
+        .alert("Leave organization?", isPresented: $isLeaveConfirmationPresented) {
+            Button("Leave", role: .destructive) {
+                Task {
+                    let previousID = store.selectedOrganization?.id
+                    await store.leaveOrganization()
+                    if store.selectedOrganization?.id != previousID { dismiss() }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("You will lose access to this organization's data.")
+        }
+        .alert("Delete organization?", isPresented: $isDeleteConfirmationPresented) {
+            Button("Delete", role: .destructive) {
+                Task {
+                    let previousID = store.selectedOrganization?.id
+                    await store.deleteOrganization()
+                    if store.selectedOrganization?.id != previousID { dismiss() }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes the organization and its access.")
+        }
         .accessibilityIdentifier("wisent.auth.organization-management")
     }
 
-    private var availableRoles: [String] {
-        store.selectedOrganization?.role == "owner" ? roles : ["admin", "member"]
+    private var availableInviteRoles: [WisentOrganizationRole] {
+        store.selectedOrganization?.organizationRole == .owner
+            ? WisentOrganizationRole.allCases
+            : [.member]
     }
 
-    private func canEdit(_ member: WisentOrganizationMember) -> Bool {
+    private func canManage(_ member: WisentOrganizationMember) -> Bool {
         guard member.userID != store.session?.userID,
-              let organization = store.selectedOrganization else { return false }
-        if organization.role == "owner" { return true }
-        return organization.role == "admin" && member.role != "owner"
+              let callerRole = store.selectedOrganization?.organizationRole else {
+            return false
+        }
+        return callerRole == .owner || (callerRole == .admin && member.organizationRole == .member)
+    }
+
+    private func canCancel(_ invitation: WisentOrganizationInvite) -> Bool {
+        guard let callerRole = store.selectedOrganization?.organizationRole else {
+            return false
+        }
+        return callerRole == .owner
+            || (callerRole == .admin && invitation.organizationRole == .member)
     }
 }
 

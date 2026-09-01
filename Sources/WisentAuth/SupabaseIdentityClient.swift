@@ -67,18 +67,101 @@ actor SupabaseIdentityClient {
         return try JSONDecoder().decode([MembershipRow].self, from: data).map(\.value)
     }
 
-    func bootstrapOrganization(session identity: WisentSession) async throws -> String {
-        let data = try await rest(
-            method: "POST",
-            path: "/rest/v1/rpc/bootstrap_user",
-            body: [:],
-            accessToken: identity.accessToken
+
+    func authorizeOrganization(
+        _ organizationID: String,
+        session identity: WisentSession
+    ) async throws -> OrganizationAuthorizationRow {
+        let data = try await rpc(
+            "authorize_organization",
+            body: ["target_org_id": organizationID],
+            session: identity,
+            organizationID: organizationID
         )
-        guard let id = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) as? String,
-              !id.isEmpty else {
-            throw WisentAuthError.noOrganization
+        let rows = try Self.decode([OrganizationAuthorizationRow].self, from: data)
+        guard rows.count == 1,
+              let authorization = rows.first,
+              authorization.userID == identity.userID,
+              authorization.organizationID == organizationID else {
+            throw WisentAuthError.organizationRefusal(.noMembership)
         }
-        return id
+        return authorization
+    }
+
+    func createOrganization(
+        name: String,
+        slug: String,
+        session identity: WisentSession
+    ) async throws -> String {
+        let data = try await rpc(
+            "create_organization",
+            body: ["organization_name": name, "organization_slug": slug],
+            session: identity
+        )
+        return try Self.decodeIdentifier(data)
+    }
+
+    func renameOrganization(
+        _ organizationID: String,
+        name: String,
+        session identity: WisentSession
+    ) async throws {
+        _ = try await rpc(
+            "rename_organization",
+            body: ["target_org_id": organizationID, "new_name": name],
+            session: identity,
+            organizationID: organizationID
+        )
+    }
+
+    func updateOrganizationSlug(
+        _ organizationID: String,
+        slug: String,
+        session identity: WisentSession
+    ) async throws {
+        _ = try await rpc(
+            "update_organization_slug",
+            body: ["target_org_id": organizationID, "new_slug": slug],
+            session: identity,
+            organizationID: organizationID
+        )
+    }
+
+    func leaveOrganization(
+        _ organizationID: String,
+        session identity: WisentSession
+    ) async throws {
+        _ = try await rpc(
+            "leave_organization",
+            body: ["target_org_id": organizationID],
+            session: identity,
+            organizationID: organizationID
+        )
+    }
+
+    func deleteOrganization(
+        _ organizationID: String,
+        session identity: WisentSession
+    ) async throws {
+        _ = try await rpc(
+            "delete_organization",
+            body: ["target_org_id": organizationID],
+            session: identity,
+            organizationID: organizationID
+        )
+    }
+
+    func transferOrganizationOwnership(
+        _ organizationID: String,
+        to userID: String,
+        session identity: WisentSession
+    ) async throws {
+        _ = try await rpc(
+            "transfer_organization_ownership",
+            body: ["target_org_id": organizationID, "target_user_id": userID],
+            session: identity,
+            organizationID: organizationID
+        )
     }
 
     func pendingInvitations(session identity: WisentSession) async throws -> [WisentUserInvite] {
@@ -90,7 +173,8 @@ actor SupabaseIdentityClient {
         let data = try await rpc(
             "accept_org_invite",
             body: ["invite_token": invitation.token],
-            session: identity
+            session: identity,
+            organizationID: invitation.organizationID
         )
         guard let organizationID = try JSONSerialization.jsonObject(
             with: data,
@@ -105,7 +189,8 @@ actor SupabaseIdentityClient {
         _ = try await rpc(
             "decline_org_invite",
             body: ["invite_id": invitation.id],
-            session: identity
+            session: identity,
+            organizationID: invitation.organizationID
         )
     }
 
@@ -116,7 +201,8 @@ actor SupabaseIdentityClient {
         let data = try await rpc(
             "list_org_members_for_org",
             body: ["target_org_id": organizationID],
-            session: identity
+            session: identity,
+            organizationID: organizationID
         )
         return try Self.decode([WisentOrganizationMember].self, from: data)
     }
@@ -128,14 +214,15 @@ actor SupabaseIdentityClient {
         let data = try await rpc(
             "list_org_invites_for_org",
             body: ["target_org_id": organizationID],
-            session: identity
+            session: identity,
+            organizationID: organizationID
         )
         return try Self.decode([WisentOrganizationInvite].self, from: data)
     }
 
     func inviteMember(
         email: String,
-        role: String,
+        role: WisentOrganizationRole,
         organizationID: String,
         session identity: WisentSession
     ) async throws {
@@ -144,9 +231,10 @@ actor SupabaseIdentityClient {
             body: [
                 "target_org_id": organizationID,
                 "invitee_email": email,
-                "invitee_role": role,
+                "invitee_role": role.rawValue,
             ],
-            session: identity
+            session: identity,
+            organizationID: organizationID
         )
     }
 
@@ -158,7 +246,8 @@ actor SupabaseIdentityClient {
         _ = try await rpc(
             "cancel_org_invite_for_org",
             body: ["target_org_id": organizationID, "invite_id": id],
-            session: identity
+            session: identity,
+            organizationID: organizationID
         )
     }
 
@@ -170,13 +259,14 @@ actor SupabaseIdentityClient {
         _ = try await rpc(
             "remove_org_member_from_org",
             body: ["target_org_id": organizationID, "member_user_id": userID],
-            session: identity
+            session: identity,
+            organizationID: organizationID
         )
     }
 
     func updateMemberRole(
         userID: String,
-        role: String,
+        role: WisentOrganizationRole,
         organizationID: String,
         session identity: WisentSession
     ) async throws {
@@ -185,22 +275,25 @@ actor SupabaseIdentityClient {
             body: [
                 "target_org_id": organizationID,
                 "member_user_id": userID,
-                "new_role": role,
+                "new_role": role.rawValue,
             ],
-            session: identity
+            session: identity,
+            organizationID: organizationID
         )
     }
 
     private func rpc(
         _ name: String,
         body: [String: Any],
-        session identity: WisentSession
+        session identity: WisentSession,
+        organizationID: String? = nil
     ) async throws -> Data {
         try await rest(
             method: "POST",
             path: "/rest/v1/rpc/\(name)",
             body: body,
-            accessToken: identity.accessToken
+            accessToken: identity.accessToken,
+            organizationID: organizationID
         )
     }
 
@@ -220,6 +313,32 @@ actor SupabaseIdentityClient {
             return date
         }
         return try decoder.decode(type, from: data)
+    }
+
+    private static func decodeIdentifier(_ data: Data) throws -> String {
+        guard let identifier = try JSONSerialization.jsonObject(
+            with: data,
+            options: [.fragmentsAllowed]
+        ) as? String, !identifier.isEmpty else {
+            throw WisentAuthError.noOrganization
+        }
+        return identifier
+    }
+
+    private static func organizationRefusal(from data: Data) -> WisentOrganizationRefusal? {
+        guard let object = try? JSONSerialization.jsonObject(
+            with: data,
+            options: [.fragmentsAllowed]
+        ) else {
+            return nil
+        }
+        let message: String?
+        if let payload = object as? [String: Any] {
+            message = payload["message"] as? String
+        } else {
+            message = object as? String
+        }
+        return message.flatMap(WisentOrganizationRefusal.init(rawValue:))
     }
 
     private var normalizedBaseURL: String {
@@ -245,16 +364,24 @@ actor SupabaseIdentityClient {
         method: String,
         path: String,
         body: [String: Any]? = nil,
-        accessToken: String
+        accessToken: String,
+        organizationID: String? = nil
     ) async throws -> Data {
-        try await request(method: method, path: path, body: body, accessToken: accessToken)
+        try await request(
+            method: method,
+            path: path,
+            body: body,
+            accessToken: accessToken,
+            organizationID: organizationID
+        )
     }
 
     private func request(
         method: String,
         path: String,
         body: [String: Any]?,
-        accessToken: String
+        accessToken: String,
+        organizationID: String? = nil
     ) async throws -> Data {
         guard let url = URL(string: normalizedBaseURL + path) else {
             throw WisentAuthError.malformedURL(normalizedBaseURL + path)
@@ -264,8 +391,17 @@ actor SupabaseIdentityClient {
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.timeoutInterval = 30
         request.setValue(configuration.anonKey, forHTTPHeaderField: "apikey")
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(
+            "Bearer \(accessToken)",
+            forHTTPHeaderField: WisentAuthHeader.authorization
+        )
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let organizationID {
+            request.setValue(
+                organizationID,
+                forHTTPHeaderField: WisentAuthHeader.organizationID
+            )
+        }
         if let body {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -274,6 +410,10 @@ actor SupabaseIdentityClient {
         let point = WisentFailurePoint.forRequest(path: path)
         guard let http = response as? HTTPURLResponse else { throw WisentAuthError.invalidResponse(point) }
         guard (200...299).contains(http.statusCode) else {
+            if path.hasPrefix("/rest/v1/rpc/"),
+               let refusal = Self.organizationRefusal(from: data) {
+                throw WisentAuthError.organizationRefusal(refusal)
+            }
             throw WisentAuthError.http(
                 WisentUpstreamResponse(
                     status: http.statusCode,

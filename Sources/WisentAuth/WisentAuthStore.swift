@@ -42,7 +42,7 @@ public final class WisentAuthStore: ObservableObject {
     @Published public private(set) var organizationMembers: [WisentOrganizationMember] = []
     @Published public private(set) var organizationInvitations: [WisentOrganizationInvite] = []
     @Published public var inviteEmail = ""
-    @Published public var inviteRole = "member"
+    @Published public var inviteRole = WisentOrganizationRole.member
     @Published public private(set) var isOrganizationBusy = false
     @Published public private(set) var organizationError: String?
     @Published public private(set) var organizationFailure: WisentFailure?
@@ -61,6 +61,11 @@ public final class WisentAuthStore: ObservableObject {
     private var resendCountdownTask: Task<Void, Never>?
     private var webSession: (any OAuthWebSession)?
     private let webSessionFactory: @MainActor () -> any OAuthWebSession
+    private var sharedIdentityObserver: NSObjectProtocol?
+    private let sharedIdentityNotificationSource = UUID().uuidString
+    private static let sharedIdentityDidChange = Notification.Name(
+        "ai.wisent.identity.didChange"
+    )
     private static let refreshLeadTime: TimeInterval = 5 * 60
     private static let resendDuration = 60
 
@@ -118,11 +123,27 @@ public final class WisentAuthStore: ObservableObject {
         client = SupabaseIdentityClient(configuration: configuration)
         self.persistence = persistence ?? KeychainIdentityStore(bundleIdentifier: bundleIdentifier)
         self.webSessionFactory = webSessionFactory ?? { DesktopWebAuthSession() }
+        sharedIdentityObserver = DistributedNotificationCenter.default().addObserver(
+            forName: Self.sharedIdentityDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  notification.object as? String != self.sharedIdentityNotificationSource else {
+                return
+            }
+            Task { @MainActor [weak self] in
+                await self?.synchronizeSharedIdentity()
+            }
+        }
     }
 
     deinit {
         refreshTask?.cancel()
         resendCountdownTask?.cancel()
+        if let sharedIdentityObserver {
+            DistributedNotificationCenter.default().removeObserver(sharedIdentityObserver)
+        }
     }
 
     public var identity: WisentIdentity? {
@@ -167,11 +188,11 @@ public final class WisentAuthStore: ObservableObject {
                     refresh lead time (expiry \(storedExpiry, privacy: .public)); refreshing
                     """
                 )
-                stored = StoredIdentity(
-                    session: try await client.refresh(refreshToken: stored.session.refreshToken),
-                    selectedOrganizationID: stored.selectedOrganizationID
-                )
-                try persistence.save(stored)
+                guard let refreshed = try await refreshedStoredIdentity() else {
+                    transitionToSignedOut()
+                    return
+                }
+                stored = refreshed
                 Self.restoreLog.notice(
                     """
                     \(self.productName, privacy: .public): refresh accepted; new expiry \
@@ -277,29 +298,122 @@ public final class WisentAuthStore: ObservableObject {
         status = .signedOut
     }
 
-    public func selectOrganization(_ organization: WisentOrganization) {
-        guard organizations.contains(where: { $0.id == organization.id }), let session else { return }
-        selectedOrganization = organization
-        organizationMembers = []
-        organizationInvitations = []
-        inviteEmail = ""
-        inviteRole = "member"
-        organizationError = nil
-        status = .ready
-        publishRestoredIdentityIfReady()
+    public func selectOrganization(_ organization: WisentOrganization) async {
+        guard organizations.contains(where: { $0.id == organization.id }),
+              await ensureFreshSession(),
+              let session else { return }
         do {
-            try persistence.save(
-                StoredIdentity(session: session, selectedOrganizationID: organization.id)
+            let authorization = try await client.authorizeOrganization(
+                organization.id,
+                session: session
+            )
+            selectOrganizationLocally(
+                WisentOrganization(
+                    id: organization.id,
+                    slug: organization.slug,
+                    name: organization.name,
+                    role: authorization.role
+                )
             )
         } catch {
-            report(error, point: .storage)
+            reportOrganization(error, point: .organizations)
+        }
+    }
+
+    public func reloadOrganizations() async {
+        await resolveOrganizations(preferredID: selectedOrganization?.id)
+    }
+
+    public func createOrganization(name: String, slug: String) async {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let slug = slug.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !name.isEmpty, !slug.isEmpty else {
+            organizationNote("Enter an organization name and slug.")
+            return
+        }
+        guard !isOrganizationBusy,
+              await ensureFreshUserSession(),
+              let session else { return }
+        isOrganizationBusy = true
+        clearOrganizationFailure()
+        defer { isOrganizationBusy = false }
+        do {
+            let organizationID = try await client.createOrganization(
+                name: name,
+                slug: slug,
+                session: session
+            )
+            await resolveOrganizations(preferredID: organizationID)
+        } catch {
+            reportOrganization(error, point: .organizations)
+        }
+    }
+
+    public func renameOrganization(name: String) async {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            organizationNote("Enter an organization name.")
+            return
+        }
+        guard selectedOrganization?.organizationRole?.canManageMembers == true else {
+            organizationNote("Only organization owners and admins can rename it.")
+            return
+        }
+        await performOrganizationLifecycle { session, organization in
+            try await client.renameOrganization(organization.id, name: name, session: session)
+        }
+    }
+
+    public func updateOrganizationSlug(_ slug: String) async {
+        let slug = slug.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !slug.isEmpty else {
+            organizationNote("Enter an organization slug.")
+            return
+        }
+        guard selectedOrganization?.organizationRole == .owner else {
+            organizationNote("Only an organization owner can change its slug.")
+            return
+        }
+        await performOrganizationLifecycle { session, organization in
+            try await client.updateOrganizationSlug(organization.id, slug: slug, session: session)
+        }
+    }
+
+    public func leaveOrganization() async {
+        await performOrganizationLifecycle(preferCurrent: false) { session, organization in
+            try await client.leaveOrganization(organization.id, session: session)
+        }
+    }
+
+    public func deleteOrganization() async {
+        guard selectedOrganization?.organizationRole == .owner else {
+            organizationNote("Only an organization owner can delete it.")
+            return
+        }
+        await performOrganizationLifecycle(preferCurrent: false) { session, organization in
+            try await client.deleteOrganization(organization.id, session: session)
+        }
+    }
+
+    public func transferOrganizationOwnership(to member: WisentOrganizationMember) async {
+        guard selectedOrganization?.organizationRole == .owner,
+              member.userID != session?.userID else {
+            organizationNote("Choose another member to receive ownership.")
+            return
+        }
+        await performOrganizationLifecycle { session, organization in
+            try await client.transferOrganizationOwnership(
+                organization.id,
+                to: member.userID,
+                session: session
+            )
         }
     }
 
     public func acceptInvitation(_ invitation: WisentUserInvite) async {
         guard pendingInvitations.contains(where: { $0.id == invitation.id }),
               !isBusy,
-              await ensureFreshSession(),
+              await ensureFreshUserSession(),
               let session else { return }
         isBusy = true
         clearFailure()
@@ -307,11 +421,7 @@ public final class WisentAuthStore: ObservableObject {
         do {
             let organizationID = try await client.acceptInvitation(invitation, session: session)
             pendingInvitations.removeAll { $0.id == invitation.id }
-            if pendingInvitations.isEmpty {
-                await resolveOrganizations(preferredID: organizationID)
-            } else {
-                status = .reviewingInvitations
-            }
+            await resolveOrganizations(preferredID: organizationID)
         } catch {
             report(error, point: .organizations)
         }
@@ -320,7 +430,7 @@ public final class WisentAuthStore: ObservableObject {
     public func declineInvitation(_ invitation: WisentUserInvite) async {
         guard pendingInvitations.contains(where: { $0.id == invitation.id }),
               !isBusy,
-              await ensureFreshSession(),
+              await ensureFreshUserSession(),
               let session else { return }
         isBusy = true
         clearFailure()
@@ -328,11 +438,7 @@ public final class WisentAuthStore: ObservableObject {
         do {
             try await client.declineInvitation(invitation, session: session)
             pendingInvitations.removeAll { $0.id == invitation.id }
-            if pendingInvitations.isEmpty {
-                await resolveOrganizations(preferredID: nil)
-            } else {
-                status = .reviewingInvitations
-            }
+            await resolveOrganizations(preferredID: selectedOrganization?.id)
         } catch {
             report(error, point: .organizations)
         }
@@ -348,21 +454,23 @@ public final class WisentAuthStore: ObservableObject {
             organizationNote("Enter a valid email address.")
             return
         }
-        guard let organization = selectedOrganization, organization.canManageMembers else {
-            organizationNote("Your organization role cannot send invitations.")
+        guard let callerRole = selectedOrganization?.organizationRole,
+              callerRole.canManageMembers else {
+            organizationNote("Choose a role allowed by your organization access.")
             return
         }
-        let allowedRoles = organization.role == "owner"
-            ? ["owner", "admin", "member"]
-            : ["admin", "member"]
-        guard allowedRoles.contains(inviteRole) else {
+        let role = inviteRole
+        let allowedRoles: [WisentOrganizationRole] = callerRole == .owner
+            ? WisentOrganizationRole.allCases
+            : [.member]
+        guard allowedRoles.contains(role) else {
             organizationNote("Choose a role allowed by your organization access.")
             return
         }
         await performOrganizationOperation { session, organization in
             try await client.inviteMember(
                 email: address,
-                role: inviteRole,
+                role: role,
                 organizationID: organization.id,
                 session: session
             )
@@ -371,6 +479,12 @@ public final class WisentAuthStore: ObservableObject {
     }
 
     public func cancelOrganizationInvitation(_ invitation: WisentOrganizationInvite) async {
+        guard let callerRole = selectedOrganization?.organizationRole,
+              callerRole == .owner
+                || (callerRole == .admin && invitation.organizationRole == .member) else {
+            organizationNote("Your organization role cannot cancel this invitation.")
+            return
+        }
         await performOrganizationOperation { session, organization in
             try await client.cancelInvitation(
                 id: invitation.id,
@@ -381,6 +495,12 @@ public final class WisentAuthStore: ObservableObject {
     }
 
     public func removeOrganizationMember(_ member: WisentOrganizationMember) async {
+        guard member.userID != session?.userID,
+              let callerRole = selectedOrganization?.organizationRole,
+              callerRole == .owner || (callerRole == .admin && member.organizationRole == .member) else {
+            organizationNote("Your organization role cannot remove this member.")
+            return
+        }
         await performOrganizationOperation { session, organization in
             try await client.removeMember(
                 userID: member.userID,
@@ -390,12 +510,14 @@ public final class WisentAuthStore: ObservableObject {
         }
     }
 
+
     public func updateOrganizationMemberRole(
         _ member: WisentOrganizationMember,
-        role: String
+        role: WisentOrganizationRole
     ) async {
-        guard ["owner", "admin", "member"].contains(role) else {
-            organizationNote("Choose a valid organization role.")
+        guard selectedOrganization?.organizationRole == .owner,
+              member.userID != session?.userID else {
+            organizationNote("Only an owner can change another member's role.")
             return
         }
         await performOrganizationOperation { session, organization in
@@ -437,35 +559,33 @@ public final class WisentAuthStore: ObservableObject {
             try? await client.signOut(accessToken: token)
         }
         try? persistence.clear()
-        session = nil
-        restoredIdentity = nil
-        restoredIdentityPending = false
-        organizations = []
-        selectedOrganization = nil
-        pendingInvitations = []
-        organizationMembers = []
-        organizationInvitations = []
-        inviteEmail = ""
-        inviteRole = "member"
-        clearOrganizationFailure()
-        email = ""
-        code = ""
-        clearFailure()
-        status = .signedOut
+        transitionToSignedOut()
+        broadcastSharedIdentityChange()
     }
 
     @discardableResult
     public func ensureFreshSession() async -> Bool {
+        await refreshSessionIfNeeded(requiresOrganization: true)
+    }
+
+    private func ensureFreshUserSession() async -> Bool {
+        await refreshSessionIfNeeded(requiresOrganization: false)
+    }
+
+    private func refreshSessionIfNeeded(requiresOrganization: Bool) async -> Bool {
         guard let current = session else { return false }
         guard current.expiresAt.timeIntervalSinceNow <= Self.refreshLeadTime else { return true }
         do {
-            let refreshed = try await client.refresh(refreshToken: current.refreshToken)
-            session = refreshed
-            try persistence.save(
-                StoredIdentity(session: refreshed, selectedOrganizationID: selectedOrganization?.id)
-            )
-            scheduleRefresh(for: refreshed)
-            return true
+            guard let stored = try await refreshedStoredIdentity() else {
+                transitionToSignedOut()
+                return false
+            }
+            session = stored.session
+            email = stored.session.email
+            scheduleRefresh(for: stored.session)
+            await resolveOrganizations(preferredID: stored.selectedOrganizationID)
+            let contextIsReady = status == .ready && selectedOrganization != nil
+            return requiresOrganization ? contextIsReady : true
         } catch {
             // signOut() clears the published failure, so the message is
             // published after it — otherwise the user lands on a bare sign-in
@@ -499,6 +619,10 @@ public final class WisentAuthStore: ObservableObject {
             let session = webSessionFactory()
             webSession = session
             let callback = try await session.start(url: url, callbackScheme: configuration.callbackScheme)
+            guard callback.scheme == configuration.callbackScheme,
+                  callback.host == "auth-callback" else {
+                throw WisentAuthError.oauthRejected("\(label) returned an unexpected callback")
+            }
             let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems
             guard let authorizationCode = items?.first(where: { $0.name == "code" })?.value,
                   !authorizationCode.isEmpty else {
@@ -524,6 +648,7 @@ public final class WisentAuthStore: ObservableObject {
         email = newSession.email
         code = ""
         try persistence.save(StoredIdentity(session: newSession, selectedOrganizationID: nil))
+        broadcastSharedIdentityChange()
         scheduleRefresh(for: newSession)
         await resolveOrganizations(preferredID: nil)
     }
@@ -536,40 +661,51 @@ public final class WisentAuthStore: ObservableObject {
         status = .resolvingOrganization
         clearFailure()
         do {
-            let invitations = try await client.pendingInvitations(session: session)
-            if !invitations.isEmpty {
-                pendingInvitations = invitations
-                status = .reviewingInvitations
-                return
-            }
-            pendingInvitations = []
-
-            var available = try await client.organizations(session: session)
-            if available.isEmpty {
-                let bootstrappedID = try await client.bootstrapOrganization(session: session)
-                available = try await client.organizations(session: session)
-                if available.isEmpty {
-                    throw WisentAuthError.noOrganization
-                }
-                organizations = available
-                if let organization = available.first(where: { $0.id == bootstrappedID }) ?? available.first {
-                    selectOrganization(organization)
-                }
-                return
-            }
-
+            async let availableRequest = client.organizations(session: session)
+            async let invitationsRequest = client.pendingInvitations(session: session)
+            let available = try await availableRequest
+            pendingInvitations = try await invitationsRequest
             organizations = available
-            if let preferredID, let preferred = available.first(where: { $0.id == preferredID }) {
-                selectOrganization(preferred)
-            } else if available.count == 1, let only = available.first {
-                selectOrganization(only)
-            } else {
+
+            guard !available.isEmpty else {
                 selectedOrganization = nil
+                organizationMembers = []
+                organizationInvitations = []
+                try persistence.save(
+                    StoredIdentity(session: session, selectedOrganizationID: nil)
+                )
+                broadcastSharedIdentityChange()
+                status = pendingInvitations.isEmpty ? .choosingOrganization : .reviewingInvitations
+                return
+            }
+
+            let candidate: WisentOrganization?
+            if let preferredID {
+                candidate = available.first(where: { $0.id == preferredID })
+            } else if available.count == 1 {
+                candidate = available.first
+            } else {
+                candidate = nil
+            }
+
+            guard let candidate else {
+                selectedOrganization = nil
+                organizationMembers = []
+                organizationInvitations = []
+                try persistence.save(
+                    StoredIdentity(session: session, selectedOrganizationID: nil)
+                )
+                broadcastSharedIdentityChange()
+                status = .choosingOrganization
+                return
+            }
+            await selectOrganization(candidate)
+            if selectedOrganization?.id != candidate.id {
                 status = .choosingOrganization
             }
         } catch {
             report(error, point: .organizations)
-            status = .signedOut
+            status = organizations.isEmpty ? .choosingOrganization : .signedOut
         }
     }
 
@@ -589,16 +725,40 @@ public final class WisentAuthStore: ObservableObject {
         defer { isOrganizationBusy = false }
         do {
             try await operation(session, organization)
-            async let members = client.organizationMembers(
+            organizationMembers = try await client.organizationMembers(
                 organizationID: organization.id,
                 session: session
             )
-            async let invitations = client.organizationInvitations(
-                organizationID: organization.id,
-                session: session
-            )
-            organizationMembers = try await members
-            organizationInvitations = try await invitations
+            if organization.canManageMembers {
+                organizationInvitations = try await client.organizationInvitations(
+                    organizationID: organization.id,
+                    session: session
+                )
+            } else {
+                organizationInvitations = []
+            }
+        } catch {
+            reportOrganization(error, point: .organizations)
+        }
+    }
+
+    private func performOrganizationLifecycle(
+        preferCurrent: Bool = true,
+        _ operation: (WisentSession, WisentOrganization) async throws -> Void
+    ) async {
+        guard !isOrganizationBusy,
+              await ensureFreshSession(),
+              let session,
+              let organization = selectedOrganization else {
+            organizationNote("Select an organization first.")
+            return
+        }
+        isOrganizationBusy = true
+        clearOrganizationFailure()
+        defer { isOrganizationBusy = false }
+        do {
+            try await operation(session, organization)
+            await resolveOrganizations(preferredID: preferCurrent ? organization.id : nil)
         } catch {
             reportOrganization(error, point: .organizations)
         }
@@ -656,6 +816,103 @@ public final class WisentAuthStore: ObservableObject {
         }
     }
 
+    private func selectOrganizationLocally(_ organization: WisentOrganization) {
+        guard let session,
+              let index = organizations.firstIndex(where: { $0.id == organization.id }) else {
+            return
+        }
+        organizations[index] = organization
+        selectedOrganization = organization
+        organizationMembers = []
+        organizationInvitations = []
+        inviteEmail = ""
+        inviteRole = .member
+        clearOrganizationFailure()
+        status = .ready
+        publishRestoredIdentityIfReady()
+        do {
+            try persistence.save(
+                StoredIdentity(session: session, selectedOrganizationID: organization.id)
+            )
+            broadcastSharedIdentityChange()
+        } catch {
+            report(error, point: .storage)
+        }
+    }
+
+    /// Re-reads the shared item immediately before using its refresh token.
+    /// Another Wisent process may already have rotated it since this store last
+    /// published `session`; refreshing that stale token would revoke the shared
+    /// login for every app.
+    private func refreshedStoredIdentity() async throws -> StoredIdentity? {
+        guard let latest = try persistence.load() else { return nil }
+        guard latest.session.expiresAt.timeIntervalSinceNow <= Self.refreshLeadTime else {
+            return latest
+        }
+        let refreshed = try await client.refresh(refreshToken: latest.session.refreshToken)
+        let stored = StoredIdentity(
+            session: refreshed,
+            selectedOrganizationID: latest.selectedOrganizationID
+        )
+        try persistence.save(stored)
+        broadcastSharedIdentityChange()
+        return stored
+    }
+
+    private func synchronizeSharedIdentity() async {
+        do {
+            guard let stored = try persistence.load() else {
+                transitionToSignedOut()
+                return
+            }
+            let current = session.map {
+                StoredIdentity(
+                    session: $0,
+                    selectedOrganizationID: selectedOrganization?.id
+                )
+            }
+            guard stored != current else { return }
+            session = stored.session
+            email = stored.session.email
+            code = ""
+            clearFailure()
+            scheduleRefresh(for: stored.session)
+            await resolveOrganizations(preferredID: stored.selectedOrganizationID)
+        } catch {
+            report(error, point: .storage)
+        }
+    }
+
+    private func transitionToSignedOut() {
+        refreshTask?.cancel()
+        refreshTask = nil
+        resetResendCountdown()
+        session = nil
+        restoredIdentity = nil
+        restoredIdentityPending = false
+        organizations = []
+        selectedOrganization = nil
+        pendingInvitations = []
+        organizationMembers = []
+        organizationInvitations = []
+        inviteEmail = ""
+        inviteRole = .member
+        clearOrganizationFailure()
+        email = ""
+        code = ""
+        clearFailure()
+        status = .signedOut
+    }
+
+    private func broadcastSharedIdentityChange() {
+        DistributedNotificationCenter.default().postNotificationName(
+            Self.sharedIdentityDidChange,
+            object: sharedIdentityNotificationSource,
+            userInfo: nil,
+            deliverImmediately: true
+        )
+    }
+
 
 
     /// Publishes a dependency failure: the classified sentence for the screen,
@@ -663,6 +920,11 @@ public final class WisentAuthStore: ObservableObject {
     @discardableResult
     private func report(_ error: Error, point: WisentFailurePoint) -> WisentFailure {
         let classified = WisentFailureClassifier.report(error, point: point)
+        if let authError = error as? WisentAuthError,
+           case .organizationRefusal = authError {
+            organizationFailure = classified
+            organizationError = classified.message
+        }
         publish(classified)
         return classified
     }
