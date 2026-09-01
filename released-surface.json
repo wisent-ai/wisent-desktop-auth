@@ -1,5 +1,5 @@
 {
-  "source": "git-archive:0.3.0 no GitHub Release is published, established by reading the releases API's answer for wisent-ai/wisent-desktop-auth; SwiftPM resolves this package by tag, and sibling Package.resolved files pin this version",
+  "source": "git-archive:0.3.1 no GitHub Release is published, established by reading the releases API's answer for wisent-ai/wisent-desktop-auth; SwiftPM resolves this package by tag, and sibling Package.resolved files pin this version",
   "surface": [
     "case:WisentAuthStatus.choosingOrganization",
     "case:WisentAuthStatus.ready",
@@ -198,5 +198,5 @@
     "type:WisentSession",
     "type:WisentUserInvite"
   ],
-  "version": "0.3.0"
+  "version": "0.3.1"
 }
