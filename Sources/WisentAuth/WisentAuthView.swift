@@ -974,21 +974,31 @@ private struct OrganizationManagementView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 14)
-            } else if store.selectedOrganization?.organizationRole?.canManageMembers == true {
+            } else if store.selectedOrganization?.hasManagementPermission(.organizationRename) == true
+                || store.selectedOrganization?.organizationRole == .owner
+            {
                 GroupBox("Organization details") {
                     VStack(spacing: 10) {
                         HStack {
                             TextField("Organization name", text: $organizationName)
                                 .textFieldStyle(.roundedBorder)
-                            Button("Save name") {
-                                Task { await store.renameOrganization(name: organizationName) }
+                                .disabled(
+                                    store.selectedOrganization?.hasManagementPermission(
+                                        .organizationRename
+                                    ) != true
+                                )
+                            if store.selectedOrganization?.hasManagementPermission(
+                                .organizationRename
+                            ) == true {
+                                Button("Save name") {
+                                    Task { await store.renameOrganization(name: organizationName) }
+                                }
                             }
                         }
-                        HStack {
-                            TextField("organization-slug", text: $organizationSlug)
-                                .textFieldStyle(.roundedBorder)
-                                .disabled(store.selectedOrganization?.organizationRole != .owner)
-                            if store.selectedOrganization?.organizationRole == .owner {
+                        if store.selectedOrganization?.organizationRole == .owner {
+                            HStack {
+                                TextField("organization-slug", text: $organizationSlug)
+                                    .textFieldStyle(.roundedBorder)
                                 Button("Save slug") {
                                     Task { await store.updateOrganizationSlug(organizationSlug) }
                                 }
@@ -1001,7 +1011,8 @@ private struct OrganizationManagementView: View {
                 .padding(.top, 14)
             }
 
-            if let organization = store.selectedOrganization, organization.canManageMembers {
+            if let organization = store.selectedOrganization,
+               organization.hasManagementPermission(.membersInvite) {
                 GroupBox("Invite a teammate") {
                     HStack(spacing: 10) {
                         TextField("teammate@company.com", text: $store.inviteEmail)
@@ -1051,11 +1062,19 @@ private struct OrganizationManagementView: View {
                                 }
                             }
                             Spacer()
-                            Text(member.role.capitalized)
-                                .font(.caption.weight(.medium))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(.secondary.opacity(0.12), in: Capsule())
+                            VStack(alignment: .trailing, spacing: 3) {
+                                Text(member.role.capitalized)
+                                    .font(.caption.weight(.medium))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(.secondary.opacity(0.12), in: Capsule())
+                                if member.organizationRole != .owner,
+                                   !member.managementPermissions.isEmpty {
+                                    Text("\(member.managementPermissions.count) management permissions")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
                             if canManage(member) {
                                 Menu {
                                     if store.selectedOrganization?.organizationRole == .owner {
@@ -1077,6 +1096,34 @@ private struct OrganizationManagementView: View {
                                             }
                                         }
                                     }
+                                    if store.selectedOrganization?.organizationRole == .owner,
+                                       member.organizationRole != .owner {
+                                        Menu("Management permissions") {
+                                            ForEach(
+                                                WisentOrganizationManagementPermission.allCases,
+                                                id: \.self
+                                            ) { permission in
+                                                Button {
+                                                    Task {
+                                                        await store.updateOrganizationMemberPermissions(
+                                                            member,
+                                                            permissions: toggledPermissions(
+                                                                permission,
+                                                                for: member
+                                                            )
+                                                        )
+                                                    }
+                                                } label: {
+                                                    Label(
+                                                        permission.label,
+                                                        systemImage: member.managementPermissions.contains(
+                                                            permission
+                                                        ) ? "checkmark.circle.fill" : "circle"
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
                                     Divider()
                                     Button("Remove member…", role: .destructive) {
                                         memberPendingRemoval = member
@@ -1091,7 +1138,8 @@ private struct OrganizationManagementView: View {
                     }
                 }
 
-                if store.selectedOrganization?.canManageMembers == true,
+                if (store.selectedOrganization?.hasManagementPermission(.membersInvite) == true
+                    || store.selectedOrganization?.hasManagementPermission(.invitationsCancel) == true),
                    !store.organizationInvitations.isEmpty {
                     Section("Pending invitations") {
                         ForEach(store.organizationInvitations) { invitation in
@@ -1101,12 +1149,31 @@ private struct OrganizationManagementView: View {
                                     Text(invitation.role.capitalized)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                    Label(
+                                        deliveryLabel(invitation.deliveryStatus),
+                                        systemImage: deliveryIcon(invitation.deliveryStatus)
+                                    )
+                                    .font(.caption2)
+                                    .foregroundStyle(
+                                        invitation.deliveryStatus == .failed
+                                            ? Color.red
+                                            : Color.secondary
+                                    )
                                 }
                                 Spacer()
                                 if let expiresAt = invitation.expiresAt {
                                     Text(expiresAt.formatted(date: .abbreviated, time: .omitted))
                                         .font(.caption2)
                                         .foregroundStyle(.tertiary)
+                                }
+                                if canResend(invitation) {
+                                    Button(
+                                        invitation.deliveryStatus == .failed ? "Retry delivery" : "Resend"
+                                    ) {
+                                        Task {
+                                            await store.resendOrganizationInvitation(invitation)
+                                        }
+                                    }
                                 }
                                 if canCancel(invitation) {
                                     Button("Cancel", role: .destructive) {
@@ -1214,19 +1281,52 @@ private struct OrganizationManagementView: View {
     }
 
     private func canManage(_ member: WisentOrganizationMember) -> Bool {
-        guard member.userID != store.session?.userID,
-              let callerRole = store.selectedOrganization?.organizationRole else {
-            return false
-        }
-        return callerRole == .owner || (callerRole == .admin && member.organizationRole == .member)
+        guard member.userID != store.session?.userID else { return false }
+        if store.selectedOrganization?.organizationRole == .owner { return true }
+        return member.organizationRole == .member
+            && store.selectedOrganization?.hasManagementPermission(.membersRemove) == true
     }
 
     private func canCancel(_ invitation: WisentOrganizationInvite) -> Bool {
-        guard let callerRole = store.selectedOrganization?.organizationRole else {
+        guard store.selectedOrganization?.hasManagementPermission(.invitationsCancel) == true else {
             return false
         }
-        return callerRole == .owner
-            || (callerRole == .admin && invitation.organizationRole == .member)
+        return store.selectedOrganization?.organizationRole == .owner
+            || invitation.organizationRole == .member
+    }
+
+    private func canResend(_ invitation: WisentOrganizationInvite) -> Bool {
+        guard store.selectedOrganization?.hasManagementPermission(.membersInvite) == true else {
+            return false
+        }
+        return store.selectedOrganization?.organizationRole == .owner
+            || invitation.organizationRole == .member
+    }
+
+    private func toggledPermissions(
+        _ permission: WisentOrganizationManagementPermission,
+        for member: WisentOrganizationMember
+    ) -> [WisentOrganizationManagementPermission] {
+        let existing = Set(member.managementPermissions)
+        return WisentOrganizationManagementPermission.allCases.filter {
+            $0 == permission ? !existing.contains($0) : existing.contains($0)
+        }
+    }
+
+    private func deliveryLabel(_ status: WisentInvitationDeliveryStatus) -> String {
+        switch status {
+        case .pending: "Delivery pending"
+        case .sent: "Email sent"
+        case .failed: "Saved — email not delivered"
+        }
+    }
+
+    private func deliveryIcon(_ status: WisentInvitationDeliveryStatus) -> String {
+        switch status {
+        case .pending: "clock"
+        case .sent: "checkmark.circle"
+        case .failed: "exclamationmark.triangle"
+        }
     }
 
     private var canLeaveSelectedOrganization: Bool {

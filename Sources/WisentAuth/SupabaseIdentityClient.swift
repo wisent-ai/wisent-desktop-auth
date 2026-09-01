@@ -61,7 +61,7 @@ actor SupabaseIdentityClient {
         let userID = Self.queryValue(identity.userID)
         let data = try await rest(
             method: "GET",
-            path: "/rest/v1/organization_members?select=org_id,role,organizations(id,slug,name)&user_id=eq.\(userID)&order=created_at.asc",
+            path: "/rest/v1/organization_members?select=org_id,role,management_permissions,organizations(id,slug,name)&user_id=eq.\(userID)&order=created_at.asc",
             accessToken: identity.accessToken
         )
         return try JSONDecoder().decode([MembershipRow].self, from: data).map(\.value)
@@ -220,21 +220,39 @@ actor SupabaseIdentityClient {
         return try Self.decode([WisentOrganizationInvite].self, from: data)
     }
 
+    @discardableResult
     func inviteMember(
         email: String,
         role: WisentOrganizationRole,
         organizationID: String,
         session identity: WisentSession
-    ) async throws {
-        _ = try await rpc(
-            "invite_org_member_for_org",
+    ) async throws -> WisentOrganizationInvite {
+        try await deliverInvitation(
             body: [
-                "target_org_id": organizationID,
-                "invitee_email": email,
-                "invitee_role": role.rawValue,
+                "action": "create",
+                "organization_id": organizationID,
+                "email": email,
+                "role": role.rawValue,
             ],
-            session: identity,
-            organizationID: organizationID
+            organizationID: organizationID,
+            session: identity
+        )
+    }
+
+    @discardableResult
+    func resendInvitation(
+        id: String,
+        organizationID: String,
+        session identity: WisentSession
+    ) async throws -> WisentOrganizationInvite {
+        try await deliverInvitation(
+            body: [
+                "action": "resend",
+                "organization_id": organizationID,
+                "invite_id": id,
+            ],
+            organizationID: organizationID,
+            session: identity
         )
     }
 
@@ -280,6 +298,60 @@ actor SupabaseIdentityClient {
             session: identity,
             organizationID: organizationID
         )
+    }
+
+    func updateMemberPermissions(
+        userID: String,
+        permissions: [WisentOrganizationManagementPermission],
+        organizationID: String,
+        session identity: WisentSession
+    ) async throws {
+        _ = try await rpc(
+            "update_org_member_permissions_for_org",
+            body: [
+                "target_org_id": organizationID,
+                "member_user_id": userID,
+                "new_permissions": permissions.map(\.rawValue),
+            ],
+            session: identity,
+            organizationID: organizationID
+        )
+    }
+
+    private func deliverInvitation(
+        body: [String: Any],
+        organizationID: String,
+        session identity: WisentSession
+    ) async throws -> WisentOrganizationInvite {
+        do {
+            let data = try await rest(
+                method: "POST",
+                path: "/functions/v1/organization-invitations",
+                body: body,
+                accessToken: identity.accessToken,
+                organizationID: organizationID
+            )
+            return try Self.decode(InvitationFunctionResponse.self, from: data).invitation
+        } catch let error as WisentAuthError {
+            guard case let .http(response, _) = error,
+                  response.status == 502,
+                  let data = response.body.data(using: .utf8),
+                  let payload = try? Self.decode(InvitationFunctionResponse.self, from: data),
+                  payload.error?.code == "delivery_failed" else {
+                throw error
+            }
+            throw WisentAuthError.invitationSavedButUndelivered(payload.invitation)
+        }
+    }
+
+    private struct InvitationFunctionResponse: Decodable {
+        struct FunctionError: Decodable {
+            let code: String
+            let message: String
+        }
+
+        let invitation: WisentOrganizationInvite
+        let error: FunctionError?
     }
 
     private func rpc(

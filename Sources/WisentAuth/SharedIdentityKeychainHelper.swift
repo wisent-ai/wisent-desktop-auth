@@ -6,6 +6,9 @@ import Security
 /// identifiers, without requiring a restricted Keychain access-group profile.
 struct SharedIdentityKeychainHelper: Sendable {
     static let bundleRelativePath = "Contents/Helpers/WisentIdentityKeychainHelper"
+    static let siblingExecutableName = "wisent-identity-keychain-helper"
+    static let environmentKey = "WISENT_IDENTITY_KEYCHAIN_HELPER"
+    static let userLibexecRelativePath = ".local/libexec/wisent/WisentIdentityKeychainHelper"
 
     private enum Action: UInt8 {
         case load = 1
@@ -14,13 +17,40 @@ struct SharedIdentityKeychainHelper: Sendable {
     }
 
     private let executableURL: URL
+    static func installed(
+        in bundle: Bundle = .main,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        executableURL: URL? = Bundle.main.executableURL,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> Self? {
+        var candidates = [
+            bundle.bundleURL.appending(path: bundleRelativePath),
+        ]
+        if let explicit = environment[environmentKey], !explicit.isEmpty {
+            candidates.append(URL(fileURLWithPath: explicit))
+        }
+        if let executableURL {
+            candidates.append(
+                executableURL
+                    .deletingLastPathComponent()
+                    .appending(path: siblingExecutableName)
+            )
+        }
+        candidates.append(homeDirectory.appending(path: userLibexecRelativePath))
 
-    static func installed(in bundle: Bundle = .main) -> Self? {
-        let url = bundle.bundleURL.appending(path: bundleRelativePath)
-        guard FileManager.default.isExecutableFile(atPath: url.path) else {
+        guard let candidate = candidates.first(where: isRunnableExecutable) else {
             return nil
         }
-        return Self(executableURL: url)
+        return Self(executableURL: candidate)
+    }
+
+    private static func isRunnableExecutable(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue else {
+            return false
+        }
+        return FileManager.default.isExecutableFile(atPath: url.path)
     }
 
     func load() throws -> Data? {

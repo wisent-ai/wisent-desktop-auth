@@ -12,6 +12,7 @@ let package = Package(
             name: "wisent-identity-keychain-helper",
             targets: ["WisentIdentityKeychainHelper"]
         ),
+        .executable(name: "wisent-auth", targets: ["WisentAuthCLI"]),
     ],
     dependencies: [
         // Consumed by URL, not by sibling path: a path dependency inside a
@@ -62,6 +63,10 @@ let package = Package(
         .executableTarget(
             name: "WisentIdentityKeychainHelper",
             linkerSettings: [.linkedFramework("Security")]
+        ),
+        .executableTarget(
+            name: "WisentAuthCLI",
+            dependencies: ["WisentAuth"]
         ),
         .testTarget(
             name: "WisentAuthTests",

@@ -33,7 +33,7 @@ struct KeychainIdentityStore: IdentityPersistence, @unchecked Sendable {
 
     /// Three sources can answer, and until this log existed the caller could
     /// not tell which one did - or tell "nothing is stored" apart from "the
-    /// packaged helper said not-found while a shared item was sitting right
+    /// selected helper said not-found while a shared item was sitting right
     /// there". Both arrive as `nil`.
     private static let log = Logger(
         subsystem: "ai.wisent.desktop.auth",
@@ -43,7 +43,7 @@ struct KeychainIdentityStore: IdentityPersistence, @unchecked Sendable {
     func load() throws -> StoredIdentity? {
         if let helper {
             if let data = try helper.load() {
-                Self.log.notice("identity read from the packaged helper's shared item")
+                Self.log.notice("identity read from the selected helper's shared item")
                 return try decoder.decode(StoredIdentity.self, from: data)
             }
             guard let fallback = try loadKeychainValue() else {
@@ -58,7 +58,7 @@ struct KeychainIdentityStore: IdentityPersistence, @unchecked Sendable {
             try deleteKeychainStores()
             return fallback
         }
-        Self.log.notice("no packaged helper in this bundle; reading the per-app item directly")
+        Self.log.notice("no executable shared helper discovered; reading the per-app item directly")
         return try loadKeychainWithAccessGroupMigration()
     }
 

@@ -69,7 +69,10 @@ Wisent Desktop Auth serves:
   propagation of shared session and organization changes;
 - organization creation, discovery, rename, slug update, selection, switching,
   leaving, deletion and ownership transfer;
-- invitation review plus member/invitation listing and role management;
+- typed central organization-management permissions and exact-set assignment;
+- invitation review, server-rendered email delivery and resend status, plus
+  member/invitation listing, role management, removal, and cancellation;
+- the `wisent-auth` JSON CLI backed by the same store and persisted session;
 - shared access and refresh token persistence in macOS Keychain, with one-time
   migration from each host's former bundle-scoped session;
 - classified user-safe failures and separately logged operator diagnostics.
@@ -80,11 +83,12 @@ Wisent Desktop Auth serves:
   `Authorization: Bearer <Supabase JWT>` and
   `X-Wisent-Organization-ID: <uuid>`; every host service must validate both and
   verify membership server-side.
-- `WisentOrganization.canManageMembers` is a UI capability hint derived from the
-  returned `WisentOrganizationRole`; Supabase RPCs/RLS remain the enforcement
-  boundary.
-- The package does not own product plans, entitlements, checkout, subscription
-  state, usage metering, or feature gates.
+- `WisentOrganization.managementPermissions` and member permission arrays are UI
+  capability hints. Supabase RPCs/RLS remain the enforcement boundary, and owner
+  authority cannot be manufactured by client state.
+- The four central permissions do not describe product-specific authorization.
+  Product plans, entitlements, feature gates, data policies, and billing remain
+  owned by each product.
 - It does not store or broker model-provider, workload, browser-workflow, payment,
   or customer-data credentials.
 - It does not provision a Supabase project, database schema, email delivery,
@@ -138,13 +142,13 @@ OAuth can be disabled with `WISENT_AUTH_OAUTH_ENABLED=0` while retaining email O
 ### Manage the organization lifecycle
 
 - **Actor:** a selected-organization member, admin or owner.
-- **Initial state:** the server-returned membership role allows the requested
-  operation and the session is fresh.
-- **Outcome:** users can create, reload, switch and leave organizations; admins
-  can rename and manage members within their matrix; owners can additionally
-  change slugs, transfer ownership and delete. Invitation acceptance is optional
-  when the user already has a membership.
-- **Boundary:** `WisentOrganizationRole` drives presentation, but server
+- **Initial state:** the server-returned membership role and central permission
+  array suggest the requested operation and the session is fresh.
+- **Outcome:** users can create, reload, switch and leave organizations; owners
+  can delegate any subset of rename, invite, removal, and cancellation to
+  non-owners; owners retain exclusive lifecycle, role, permission, transfer, and
+  deletion operations.
+- **Boundary:** roles and management permissions drive presentation, but server
   authorization is authoritative; client visibility cannot grant permission.
 
 ## How it works
@@ -214,8 +218,26 @@ codesign --force --identifier ai.wisent.identity.keychain-helper \
 ```
 
 The helper sends the session only through inherited pipes and owns the one
-shared login-Keychain item. A source-only `swift run` has no packaged helper and
-therefore keeps bundle-scoped storage.
+shared login-Keychain item. Unbundled clients discover an executable helper from
+`WISENT_IDENTITY_KEYCHAIN_HELPER`, a `wisent-identity-keychain-helper` beside
+their executable, or
+`$HOME/.local/libexec/wisent/WisentIdentityKeychainHelper`, in that order after
+the application-bundled location.
+
+Install the shared JSON CLI and its helper for the current user:
+
+```sh
+swift build -c release --product wisent-auth
+swift build -c release --product wisent-identity-keychain-helper
+install -d "$HOME/.local/bin" "$HOME/.local/libexec/wisent"
+install -m 755 .build/release/wisent-auth "$HOME/.local/bin/wisent-auth"
+install -m 755 .build/release/wisent-identity-keychain-helper \
+  "$HOME/.local/libexec/wisent/WisentIdentityKeychainHelper"
+```
+
+See [Organization administration](docs/organization-administration.md) for the
+role and permission matrices, invitation delivery semantics, GUI paths, complete
+CLI reference, and server refusal boundaries.
 
 Wrap the application content:
 
@@ -267,10 +289,11 @@ let auth = WisentAuthStore(productName: "Weles")
 ```
 
 Public observable state includes status, session, organization list/selection,
-identity, busy flags, pending invitations, management lists, and classified
-failures. Public operations cover start, OTP/OAuth sign-in, email change,
-organization creation/reload/switch/rename/slug/leave/delete/ownership transfer,
-invitation and member management, failure retry, and sign-out.
+identity, busy flags, pending invitations with delivery state, management lists
+with typed permission arrays, and classified failures. Public operations cover
+start, OTP/OAuth sign-in, email change, organization lifecycle and selection,
+invitation send/resend/review/cancellation, exact-set member permission updates,
+role/removal/ownership management, failure retry, and sign-out.
 
 Do not copy the access token into app preferences, logs, crash metadata, or UI.
 Use it only for authorized requests to the host product service.
@@ -296,8 +319,9 @@ presentation. Host content remains application-owned.
 A ready identity exposes:
 
 - user ID and email;
-- selected organization ID, slug, name, raw compatibility role, and typed
-  `organization.organizationRole: WisentOrganizationRole?`;
+- selected organization ID, slug, name, raw compatibility role, typed
+  `organization.organizationRole: WisentOrganizationRole?`, and typed
+  `organization.managementPermissions`;
 - current access token.
 
 Authorize an organization-scoped product request without constructing a header
@@ -350,10 +374,10 @@ the classified failure rather than parsing text in `errorMessage`.
 ## Security and privacy
 
 - Access and refresh tokens are saved as one generic login-Keychain item owned
-  by the packaged `WisentIdentityKeychainHelper`. Every client signs an identical
-  helper identifier with the same Wisent signing identity, so Keychain evaluates
-  one designated requirement without a restricted access-group entitlement or
-  provisioning profile.
+  by the selected executable `WisentIdentityKeychainHelper`. Packaged clients
+  sign an identical helper identifier with the same Wisent signing identity, so
+  Keychain evaluates one designated requirement without a restricted
+  access-group entitlement or provisioning profile.
 - Keychain storage protects persistence; it does not prevent a compromised host
   process from reading the public in-memory identity/access token.
 - The default shared session begins refresh five minutes before expiry. The
@@ -375,9 +399,10 @@ the classified failure rather than parsing text in `errorMessage`.
 - Share only the user's Wisent identity session. Provider, workload, browser,
   payment, customer-resource and service credentials remain outside the shared
   store and under their owning product or Skarbiec boundary.
-- Production hosts must package and sign the fixed-identifier helper. Source-only
-  and incomplete bundles intentionally fall back to isolated, bundle-scoped
-  storage.
+- Production GUI hosts must package and sign the fixed-identifier helper.
+  Unbundled tools use only an executable helper discovered through the documented
+  environment, sibling, or canonical user-libexec locations; otherwise storage
+  falls back to the caller's isolated Keychain item.
 
 ## Operational model
 
