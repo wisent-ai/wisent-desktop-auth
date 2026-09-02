@@ -92,16 +92,7 @@ public struct WisentAuthGate<Content: View>: View {
     }
 
     private var organizationLoadingView: some View {
-        let name = store.status == .resolvingOrganization
-            ? "Loading organizations"
-            : "Restoring Wisent session"
-        return VStack(spacing: 14) {
-            Text("\(name)…")
-                .foregroundStyle(.secondary)
-            WisentSkeletonList(rows: 3, lines: 2, media: true, label: name)
-                .frame(width: 360)
-        }
-        .frame(minWidth: 520, minHeight: 420)
+        WisentOrganizationLoadingView()
     }
 
     @ToolbarContentBuilder
@@ -161,6 +152,50 @@ public struct WisentAuthGate<Content: View>: View {
             .help(store.session?.email ?? "Wisent account")
             .accessibilityIdentifier("wisent.auth.account-menu")
         }
+    }
+}
+
+private struct WisentOrganizationLoadingView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 10) {
+                WisentSkeleton(.circle, width: 28, height: 28)
+                WisentSkeleton(.heading, width: 240, height: 24)
+            }
+
+            WisentSkeleton(.line, width: 360, height: 14)
+
+            VStack(spacing: 12) {
+                ForEach(0 ..< 3, id: \.self) { _ in
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 7) {
+                            WisentSkeleton(.heading, width: 190, height: 16)
+                            WisentSkeleton(.line, width: 120, height: 10)
+                        }
+                        Spacer()
+                        WisentSkeleton(.pill, width: 72, height: 22)
+                        WisentSkeleton(.line, width: 8, height: 12)
+                    }
+                    .padding(14)
+                    .background(
+                        Color.secondary.opacity(0.10),
+                        in: RoundedRectangle(cornerRadius: 12)
+                    )
+                }
+            }
+
+            HStack {
+                WisentSkeleton(.line, width: 200, height: 10)
+                Spacer()
+                WisentSkeleton(.pill, width: 64, height: 28)
+            }
+        }
+        .frame(width: 480, alignment: .leading)
+        .padding(40)
+        .frame(minWidth: 560, minHeight: 420)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading organizations")
+        .accessibilityIdentifier("wisent.auth.organization-loading")
     }
 }
 
