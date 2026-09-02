@@ -376,8 +376,9 @@ private struct WisentSignInView: View {
             }
 
             LoginPrimaryButton(
-                title: store.loadingProvider == "email" ? "Sending link..." : "Sign in with email",
-                isDisabled: store.isBusy
+                title: "Sign in with email",
+                isDisabled: store.isBusy && store.loadingProvider != "email",
+                isBusy: store.loadingProvider == "email"
             ) {
                 Task { await store.sendCode() }
             }
@@ -463,8 +464,9 @@ private struct WisentSignInView: View {
             }
 
             LoginPrimaryButton(
-                title: store.isBusy ? "Verifying..." : "Continue",
-                isDisabled: store.isBusy
+                title: "Continue",
+                isDisabled: false,
+                isBusy: store.isBusy
             ) {
                 Task { await store.verifyCode() }
             }
@@ -706,9 +708,18 @@ private struct LoginMessageBanner: View {
     }
 }
 
+/// The sign-in verb, which does not change while the sign-in runs.
+///
+/// It used to read `store.isBusy ? "Verifying..." : "Continue"`, and every
+/// application in the fleet embeds this view: at the one moment a screen reader
+/// needs the control's name, the name became a status line, and the button
+/// resized as the word changed length. `isBusy` keeps the word, hides it behind
+/// a shimmering bar of its own width, and refuses a second press — the same
+/// bargain `WisentAction(isBusy:)` makes in the shell.
 private struct LoginPrimaryButton: View {
     let title: String
     let isDisabled: Bool
+    var isBusy: Bool = false
     let action: () -> Void
     @State private var isHovering = false
 
@@ -717,6 +728,13 @@ private struct LoginPrimaryButton: View {
             Text(title)
                 .font(WisentTypography.monoMedium(16))
                 .foregroundStyle(LoginPalette.buttonText)
+                .opacity(isBusy ? 0 : 1)
+                .overlay {
+                    if isBusy {
+                        WisentSkeleton(.line, height: 10)
+                            .wisentSkeletonTone(.onDark)
+                    }
+                }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .buttonStyle(.plain)
@@ -727,9 +745,10 @@ private struct LoginPrimaryButton: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(LoginPalette.buttonBorder, lineWidth: 1)
         }
-        .opacity(isDisabled ? 0.5 : 1)
-        .disabled(isDisabled)
+        .opacity(isDisabled && !isBusy ? 0.5 : 1)
+        .disabled(isDisabled || isBusy)
         .onHover { isHovering = $0 }
+        .accessibilityLabel(title)
     }
 }
 
