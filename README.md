@@ -210,7 +210,9 @@ Wisent identity and the fixed identifier
 
 ```sh
 AUTH_CHECKOUT=.build/checkouts/wisent-desktop-auth
-"$AUTH_CHECKOUT/scripts/build-keychain-helper.sh" \
+swift build --package-path "$AUTH_CHECKOUT" --configuration release \
+  --product wisent-identity-keychain-helper --scratch-path .build/identity-helper
+install -m 0755 .build/identity-helper/release/wisent-identity-keychain-helper \
   "$APP_BUNDLE/Contents/Helpers/WisentIdentityKeychainHelper"
 codesign --force --identifier ai.wisent.identity.keychain-helper \
   --sign "$CODESIGN_IDENTITY" \
