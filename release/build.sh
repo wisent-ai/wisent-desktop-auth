@@ -10,6 +10,9 @@ set -euo pipefail
 work="$WISENT_OUTPUT_DIR/work"
 source="$work/source"
 rm -rf "$work"
+# Throwaway state is removed by the code that made it: the source copy and
+# the SwiftPM scratch tree end with the run.
+trap 'rm -rf "$work"' EXIT
 mkdir -p "$source"
 rsync -a --exclude .git --exclude .build "$WISENT_SOURCE_DIR/" "$source/"
 
