@@ -14,15 +14,9 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/wisent-ai/wisent-components.git", exact: "0.9.1"),
-        // The fleet's failure catalogue, named by exact version rather than by a
-        // commit: there is only one vocabulary if every consumer names the same
-        // one, and a version is the spelling a reader can compare at a glance.
-        // It is taggable because it declares no dependencies of its own, and tag
-        // 1.0.0 points at b01a0c99 — the very commit the fleet already resolved,
-        // so this names the same tree it always did.
         .package(
             url: "https://github.com/wisent-ai/wisent-errors",
-            exact: "1.0.0"
+            revision: "559f63fbe2c6ed3f5e6faac807e1a3363928689b"
         ),
     ],
     targets: [

@@ -364,10 +364,10 @@ secret. Never put a service-role key into this client package or host app.
 
 ## Failure semantics
 
-The library classifies failures by stable code, service, impact, retryability,
-and user-safe title/message. It distinguishes authentication rejection from
-rate limiting, network, timeout, upstream identity, storage, invalid response,
-configuration, cancellation, and unknown failures.
+The library classifies failures by stable code, service, impact, retryability and a user-safe message.
+It distinguishes authentication rejection from rate limiting, network, timeout, upstream identity, storage, invalid response, configuration, cancellation and unknown failures.
+An explicit `x-wisent-failure: refused` remains a policy refusal in CLI and GUI output: it is not retryable, not an outage and not evidence that a session expired.
+HTTP status fallback keeps the catalogue's existing classification rules.
 
 Raw URLs, upstream bodies, and Keychain status details are reserved for operator
 logging and do not enter the public `WisentFailure` UI payload. A host should use
