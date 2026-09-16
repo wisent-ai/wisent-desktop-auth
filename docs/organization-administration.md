@@ -83,6 +83,16 @@ install -m 755 .build/release/wisent-identity-keychain-helper \
 
 `wisent-auth` uses the same `WisentAuthStore` and persisted session as the native clients. Helper discovery is ordered: a helper bundled in an application, `WISENT_IDENTITY_KEYCHAIN_HELPER`, `wisent-identity-keychain-helper` beside the running CLI, then `$HOME/.local/libexec/wisent/WisentIdentityKeychainHelper`. A candidate must be executable. The environment variable is useful for a staged signed helper; it does not make a non-executable file valid.
 
+### Restoring a session without system dialogs
+
+The helper never requests a Keychain authorization window. An existing grant permits the read; a locked or unauthorized item returns the actual macOS status instead of leaving the CLI or application waiting for consent. The shared store reports that storage failure through the CLI error and the native sign-in screen. A refusal does not authorize deleting the stored session, replacing its access rules, or falling back to another user's identity.
+
+`wisent-auth status` remains a state query: it returns JSON with `signedIn: false`, `status: "signed_out"`, `failureCode`, and `failureMessage` when restoration fails. The native gate shows the same classified failure. The raw Keychain status remains available in operator logs; it is not treated as an absent session or a rejected refresh token.
+
+The helper uses the normal login Keychain unless `WISENT_IDENTITY_KEYCHAIN_PATH` selects an existing keychain file. This setting applies to the helper used by both native clients and the CLI; it is useful for isolated integration environments. An inaccessible selected file fails without silently returning to the login Keychain. Selection does not modify the user's Keychain search list.
+
+Run the native regression with `swift test --filter KeychainHelperJourneyTests`. It reads an authorized item, refuses an unauthorized read, checks the persisted value after both operations, and verifies that the user's search list stayed unchanged. Its isolated keychains live under `.build/evidence/keychain` and are removed after each successful run. Source hashes, command arguments, exit statuses, and native error codes remain in that directory.
+
 Commands write one JSON value to standard output. Failures write an actionable message to standard error and exit nonzero. Arguments containing spaces must be shell-quoted. Commands that accept `--organization <id-or-slug>` use that organization for the operation; otherwise they use the persisted selected organization.
 
 ## Complete CLI reference

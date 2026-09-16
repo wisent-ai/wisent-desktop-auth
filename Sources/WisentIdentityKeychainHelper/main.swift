@@ -5,6 +5,7 @@ import Security
 struct WisentIdentityKeychainHelper {
     private static let service = "ai.wisent.identity"
     private static let account = "primary-session"
+    private static var keychain: SecKeychain?
     private enum Action: UInt8 {
         case load = 1
         case save = 2
@@ -18,6 +19,21 @@ struct WisentIdentityKeychainHelper {
             write(status: errSecParam)
             return
         }
+        // Restoring a shared session is not consent to open an authorization
+        // window. The login Keychain uses the legacy API beneath SecItem.
+        let interaction = SecKeychainSetUserInteractionAllowed(false)
+        guard interaction == errSecSuccess else {
+            write(status: interaction)
+            return
+        }
+        if let path = ProcessInfo.processInfo.environment["WISENT_IDENTITY_KEYCHAIN_PATH"] {
+            let opened = SecKeychainOpen(path, &keychain)
+            guard opened == errSecSuccess else {
+                write(status: opened)
+                return
+            }
+        }
+
 
         switch action {
         case .load:
@@ -45,6 +61,8 @@ struct WisentIdentityKeychainHelper {
             }
 
             var item = query
+            item.removeValue(forKey: kSecMatchSearchList as String)
+            if let keychain { item[kSecUseKeychain as String] = keychain }
             item[kSecValueData as String] = value
             item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
             let addStatus = SecItemAdd(item as CFDictionary, nil)
@@ -64,11 +82,14 @@ struct WisentIdentityKeychainHelper {
     }
 
     private static var baseQuery: [String: Any] {
-        [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail,
         ]
+        if let keychain { query[kSecMatchSearchList as String] = [keychain] }
+        return query
     }
 
     private static func write(status: OSStatus, payload: Data = Data()) {

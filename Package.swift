@@ -41,5 +41,10 @@ let package = Package(
             name: "WisentAuthTests",
             dependencies: ["WisentAuth"]
         ),
+        .testTarget(
+            name: "KeychainHelperJourneyTests",
+            dependencies: ["WisentIdentityKeychainHelper", "WisentAuthCLI"],
+            path: "tests/keychain"
+        ),
     ]
 )
