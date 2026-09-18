@@ -597,6 +597,15 @@ public final class WisentAuthStore: ObservableObject {
             let contextIsReady = status == .ready && selectedOrganization != nil
             return requiresOrganization ? contextIsReady : true
         } catch {
+            // A cancelled refresh was superseded - by a newer identity read
+            // after another Wisent app broadcast a change, or by the app going
+            // away - and the request that superseded it decides the state. On
+            // 2026-09-18 Jeden reported every such cancellation as "the account
+            // service isn't responding" and showed the sign-in screen once an
+            // hour, with the identity service answering the whole time.
+            if WisentFailureClassifier.isCancellation(error) {
+                return false
+            }
             // signOut() clears the published failure, so the message is
             // published after it — otherwise the user lands on a bare sign-in
             // screen with no idea why. And only a rejected token justifies
@@ -714,6 +723,11 @@ public final class WisentAuthStore: ObservableObject {
                 status = .choosingOrganization
             }
         } catch {
+            // Superseded, not failed: the newer read of the identity decides
+            // the status, and a cancelled request must never sign anyone out.
+            if WisentFailureClassifier.isCancellation(error) {
+                return
+            }
             report(error, point: .organizations)
             status = organizations.isEmpty ? .choosingOrganization : .signedOut
         }
