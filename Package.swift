@@ -14,10 +14,12 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/wisent-ai/wisent-components.git", exact: "0.9.1"),
-        .package(
-            url: "https://github.com/wisent-ai/wisent-errors",
-            revision: "559f63fbe2c6ed3f5e6faac807e1a3363928689b"
-        ),
+        // The fleet's failure catalogue, named by version: a package that
+        // names a dependency by commit cannot itself be required by version,
+        // and every desktop app requires this one by exact tag. Tag 1.1.0
+        // points at be5aaa0 on wisent-errors main, past 559f63f (the explicit
+        // policy refusals this package reads since 0.3.6).
+        .package(url: "https://github.com/wisent-ai/wisent-errors", exact: "1.1.0"),
     ],
     targets: [
         .target(
