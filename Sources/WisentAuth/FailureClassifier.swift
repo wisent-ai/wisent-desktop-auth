@@ -3,11 +3,10 @@ import WisentErrors
 import os
 
 /// The two statuses this product reads differently from the fleet, and nothing
-/// else: the catalogue classifies every other status now. Spelled as strings
-/// because bare numeric literals are rejected in this repository.
+/// else: the catalogue classifies every other status now.
 private enum HTTPStatus {
-    static let badRequest = Int("400") ?? .zero
-    static let unprocessable = Int("422") ?? .zero
+    static let badRequest = 400
+    static let unprocessable = 422
 }
 
 /// Turns whatever URLSession, the identity provider or a decoder produced into
@@ -16,7 +15,8 @@ private enum HTTPStatus {
 enum WisentFailureClassifier {
 
     private static let logger = Logger(subsystem: "ai.wisent.desktop.auth", category: "failure")
-    private static let maxDiagnosticLength = Int("400") ?? .zero
+    /// The operator log keeps this much of a raw diagnostic; the rest is noise for a reader.
+    private static let maxDiagnosticLength = 400
 
     /// URLError codes that mean this Mac cannot reach anything. Everything else
     /// that fails at the transport layer is treated as our problem, because

@@ -2,6 +2,14 @@ import AppKit
 import SwiftUI
 import WisentDesignSystem
 
+/// The sign-in window: the width from which the brand hero fits beside the form, the form's own
+/// narrowest width, and the width the two columns take together.
+private enum SignInLayout {
+    static let heroBreakpoint: CGFloat = 1_024
+    static let minimumWidth: CGFloat = 480
+    static let widthWithHero: CGFloat = 1_120
+}
+
 private enum WisentAuthResources {
     static let bundle: Bundle = {
         let bundleName = "WisentDesktopAuth_WisentAuth.bundle"
@@ -203,15 +211,15 @@ private struct WisentSignInView: View {
     @ObservedObject var store: WisentAuthStore
     @FocusState private var emailIsFocused: Bool
     @FocusState private var focusedDigit: Int?
-    @State private var digits = Array(repeating: "", count: 6)
+    @State private var digits = Array(repeating: "", count: WisentVerificationCode.length)
     @State private var showsVerificationError = true
 
     var body: some View {
         GeometryReader { proxy in
-            let showsHero = proxy.size.width >= 1_024
+            let showsHero = proxy.size.width >= SignInLayout.heroBreakpoint
             HStack(spacing: 0) {
                 signInColumn
-                    .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: SignInLayout.minimumWidth, maxWidth: .infinity, maxHeight: .infinity)
 
                 if showsHero {
                     brandPanel
@@ -219,14 +227,14 @@ private struct WisentSignInView: View {
                 }
             }
             .frame(
-                width: max(proxy.size.width, showsHero ? 1_120 : 480),
+                width: max(proxy.size.width, showsHero ? SignInLayout.widthWithHero : SignInLayout.minimumWidth),
                 height: proxy.size.height,
                 alignment: .leading
             )
         }
         .background(LoginPalette.page)
         .clipped()
-        .frame(minWidth: 480)
+        .frame(minWidth: SignInLayout.minimumWidth)
         .accessibilityIdentifier("wisent.auth.screen")
         .onChange(of: store.code) { _, code in
             guard code != digits.joined() else { return }
@@ -549,19 +557,19 @@ private struct WisentSignInView: View {
         Binding(
             get: { digits[index] },
             set: { value in
-                if value.count == 6,
+                if value.count == WisentVerificationCode.length,
                    value.unicodeScalars.allSatisfy({ (48...57).contains($0.value) }) {
                     digits = value.map(String.init)
                     store.code = digits.joined()
                     showsVerificationError = false
-                    focusedDigit = 5
+                    focusedDigit = WisentVerificationCode.length - 1
                     return
                 }
 
                 digits[index] = value.isEmpty ? "" : String(value.suffix(1))
                 store.code = digits.joined()
                 showsVerificationError = false
-                if !digits[index].isEmpty, index < 5 {
+                if !digits[index].isEmpty, index < WisentVerificationCode.length - 1 {
                     focusedDigit = index + 1
                 }
             }
@@ -574,8 +582,8 @@ private struct WisentSignInView: View {
     }
 
     private func synchronizeDigits(with code: String) {
-        var synchronized = Array(repeating: "", count: 6)
-        for (index, character) in code.prefix(6).enumerated() {
+        var synchronized = Array(repeating: "", count: WisentVerificationCode.length)
+        for (index, character) in code.prefix(WisentVerificationCode.length).enumerated() {
             synchronized[index] = String(character)
         }
         digits = synchronized
@@ -631,7 +639,7 @@ private struct WisentAuthLoadingView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let showsRightSkeleton = proxy.size.width >= 1_024
+            let showsRightSkeleton = proxy.size.width >= SignInLayout.heroBreakpoint
             HStack(spacing: 0) {
                 VStack(spacing: 24) {
                     WisentSkeleton(.circle, width: 64, height: 64)
@@ -660,7 +668,7 @@ private struct WisentAuthLoadingView: View {
                 }
                 .frame(width: 360)
                 .padding(.horizontal, 32)
-                .frame(minWidth: 480, maxWidth: .infinity, maxHeight: .infinity)
+                .frame(minWidth: SignInLayout.minimumWidth, maxWidth: .infinity, maxHeight: .infinity)
 
                 if showsRightSkeleton {
                     WisentSkeleton(.block, width: 320, height: 320)
@@ -668,7 +676,7 @@ private struct WisentAuthLoadingView: View {
                 }
             }
             .frame(
-                width: max(proxy.size.width, 480),
+                width: max(proxy.size.width, SignInLayout.minimumWidth),
                 height: proxy.size.height,
                 alignment: .leading
             )
@@ -681,7 +689,7 @@ private struct WisentAuthLoadingView: View {
             )
         }
         .clipped()
-        .frame(minWidth: 480)
+        .frame(minWidth: SignInLayout.minimumWidth)
         .accessibilityLabel("Loading sign-in")
         .accessibilityIdentifier("wisent.auth.loading")
     }
@@ -1397,13 +1405,12 @@ private struct OrganizationManagementView: View {
     }
 }
 
-/// Spelled as strings because bare numeric literals are rejected in this
-/// repository.
+/// The failure banner's width and spacing, in points.
 private enum BannerLayout {
-    static let maxWidth = CGFloat(Int("420") ?? .zero)
-    static let horizontalPadding = CGFloat(Int("20") ?? .zero)
-    static let bottomPadding = CGFloat(Int("8") ?? .zero)
-    static let spacing = CGFloat(Int("6") ?? .zero)
+    static let maxWidth: CGFloat = 420
+    static let horizontalPadding: CGFloat = 20
+    static let bottomPadding: CGFloat = 8
+    static let spacing: CGFloat = 6
 }
 
 /// The single rendering for every failure this library shows, so one incident

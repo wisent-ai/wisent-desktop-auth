@@ -2,6 +2,9 @@ import CryptoKit
 import Foundation
 
 actor SupabaseIdentityClient {
+    /// The invitation function answers Bad Gateway when the invitation was saved but its mail was not delivered.
+    private static let badGatewayStatus = 502
+
     private let configuration: WisentAuthConfiguration
     private let session: URLSession
 
@@ -334,7 +337,7 @@ actor SupabaseIdentityClient {
             return try Self.decode(InvitationFunctionResponse.self, from: data).invitation
         } catch let error as WisentAuthError {
             guard case let .http(response, _) = error,
-                  response.status == 502,
+                  response.status == Self.badGatewayStatus,
                   let data = response.body.data(using: .utf8),
                   let payload = try? Self.decode(InvitationFunctionResponse.self, from: data),
                   payload.error?.code == "delivery_failed" else {

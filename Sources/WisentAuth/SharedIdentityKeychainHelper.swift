@@ -104,17 +104,21 @@ struct SharedIdentityKeychainHelper: Sendable {
     }
 
     private struct Response {
+        /// The helper answers with a big-endian OSStatus (four bytes) followed by the payload.
+        private static let statusByteCount = 4
+        private static let bitsPerByte = 8
+
         let status: OSStatus
         let payload: Data
 
         init(_ data: Data) throws {
-            guard data.count >= 4 else {
+            guard data.count >= Self.statusByteCount else {
                 throw WisentAuthError.keychain(errSecInternalError)
             }
-            let bytes = data.prefix(4)
-            let bits = bytes.reduce(UInt32.zero) { ($0 << 8) | UInt32($1) }
+            let bytes = data.prefix(Self.statusByteCount)
+            let bits = bytes.reduce(UInt32.zero) { ($0 << Self.bitsPerByte) | UInt32($1) }
             status = OSStatus(bitPattern: bits)
-            payload = data.dropFirst(4)
+            payload = data.dropFirst(Self.statusByteCount)
         }
     }
 }

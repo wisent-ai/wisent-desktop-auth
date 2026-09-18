@@ -14,6 +14,11 @@ public enum WisentAuthStatus: Equatable {
     case ready
 }
 
+/// The one-time code the identity provider mails is six digits long.
+public enum WisentVerificationCode {
+    public static let length = 6
+}
+
 @MainActor
 public final class WisentAuthStore: ObservableObject {
     @Published public private(set) var status: WisentAuthStatus = .restoring
@@ -253,8 +258,8 @@ public final class WisentAuthStore: ObservableObject {
 
     public func verifyCode() async {
         let token = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard token.count == 6 else {
-            note("Please enter all 6 digits")
+        guard token.count == WisentVerificationCode.length else {
+            note("Please enter all \(WisentVerificationCode.length) digits")
             return
         }
         guard !isBusy else { return }

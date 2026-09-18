@@ -4,6 +4,9 @@ import WisentAuth
 
 @main
 struct WisentAuthCommand {
+    /// `otp verify` takes the action word, the email and the code.
+    private static let verifyArgumentCount = 3
+
     @MainActor
     static func main() async {
         do {
@@ -62,7 +65,7 @@ struct WisentAuthCommand {
             try succeeded(store)
             try output(MessageOutput(ok: true, message: "Verification code requested"))
         case "verify":
-            guard arguments.count == 3 else {
+            guard arguments.count == Self.verifyArgumentCount else {
                 throw CLIError.usage("Usage: wisent-auth otp verify <email> <six-digit-code>")
             }
             store.email = arguments[1]
