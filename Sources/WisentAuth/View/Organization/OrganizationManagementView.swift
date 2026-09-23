@@ -12,6 +12,10 @@ struct OrganizationManagementView: View {
     @State var isLeaveConfirmationPresented = false
     @State var isDeleteConfirmationPresented = false
 
+    init(store: WisentAuthStore) {
+        self.store = store
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
