@@ -26,7 +26,12 @@ esac
 
 dist="$WISENT_OUTPUT_DIR/dist"
 mkdir -p "$dist"
-git -C "$WISENT_SOURCE_DIR" archive --format=tar.gz --prefix="wisent-desktop-auth-$WISENT_VERSION/" --output="$dist/wisent-desktop-auth-source.tar.gz" HEAD
-git -C "$WISENT_SOURCE_DIR" rev-parse HEAD > "$dist/SOURCE_REVISION"
+# The worker builds an unpacked git archive, which has no repository to ask:
+# the source archive is made from the clean copy this run built, and the
+# commit is the one the release names.
+packaged="$work/wisent-desktop-auth-$WISENT_VERSION"
+mv "$source" "$packaged"
+stado product tree-archive --source "$packaged" --output "$dist/wisent-desktop-auth-source.tar.gz"
+printf '%s\n' "${WISENT_SOURCE_COMMIT:?WISENT_SOURCE_COMMIT is required}" > "$dist/SOURCE_REVISION"
 source_sha="$(shasum -a 256 "$dist/wisent-desktop-auth-source.tar.gz" | awk '{print $1}')"
 printf '{"schema_version":1,"product":"wisent-desktop-auth","version":"%s","platform":"%s","source_sha256":"%s"}\n' "$WISENT_VERSION" "$WISENT_PLATFORM" "$source_sha" > "$dist/build-evidence.json"
