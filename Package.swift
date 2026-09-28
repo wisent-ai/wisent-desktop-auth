@@ -3,7 +3,12 @@ import PackageDescription
 
 let package = Package(
     name: "WisentDesktopAuth",
-    platforms: [.macOS(.v14)],
+    // iOS carries the identity store and sign-in flow only: the phone apps
+    // (oko-ios, byk-ios, jeden-ios, wisent-ios) sign in through this package
+    // instead of keeping their own Keychain session and web sign-in. The
+    // SwiftUI screens, the Keychain helper process and the permission probes
+    // that need AppKit or ApplicationServices stay macOS-only.
+    platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
         .library(name: "WisentAuth", targets: ["WisentAuth"]),
         .executable(

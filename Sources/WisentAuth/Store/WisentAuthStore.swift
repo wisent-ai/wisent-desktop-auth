@@ -1,4 +1,3 @@
-import AppKit
 import AuthenticationServices
 import Combine
 import Foundation
@@ -128,6 +127,11 @@ public final class WisentAuthStore: ObservableObject {
         client = SupabaseIdentityClient(configuration: configuration)
         self.persistence = persistence ?? KeychainIdentityStore(bundleIdentifier: bundleIdentifier)
         self.webSessionFactory = webSessionFactory ?? { DesktopWebAuthSession() }
+        // Another Wisent app on this Mac that signs in or out posts this, so
+        // every app follows the shared identity. iOS has no cross-app
+        // notification centre; an iOS app and its widget read the same
+        // access-group item on their next restore instead.
+        #if os(macOS)
         sharedIdentityObserver = DistributedNotificationCenter.default().addObserver(
             forName: Self.sharedIdentityDidChange,
             object: nil,
@@ -141,14 +145,17 @@ public final class WisentAuthStore: ObservableObject {
                 await self?.synchronizeSharedIdentity()
             }
         }
+        #endif
     }
 
     deinit {
         refreshTask?.cancel()
         resendCountdownTask?.cancel()
+        #if os(macOS)
         if let sharedIdentityObserver {
             DistributedNotificationCenter.default().removeObserver(sharedIdentityObserver)
         }
+        #endif
     }
 
     public var identity: WisentIdentity? {

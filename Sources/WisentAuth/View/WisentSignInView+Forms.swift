@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import SwiftUI
 import WisentDesignSystem
@@ -293,3 +294,4 @@ extension WisentSignInView {
         .accessibilityHidden(true)
     }
 }
+#endif

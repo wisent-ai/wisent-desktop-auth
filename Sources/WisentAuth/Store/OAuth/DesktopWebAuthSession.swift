@@ -1,4 +1,8 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import AuthenticationServices
 import Foundation
 
@@ -83,8 +87,16 @@ final class DesktopWebAuthSession: NSObject, OAuthWebSession,
     }
 
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        #if os(macOS)
         NSApplication.shared.keyWindow
             ?? NSApplication.shared.windows.first(where: \.isVisible)
             ?? ASPresentationAnchor()
+        #else
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)
+            ?? ASPresentationAnchor()
+        #endif
     }
 }

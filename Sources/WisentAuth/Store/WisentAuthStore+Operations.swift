@@ -1,4 +1,3 @@
-import AppKit
 import AuthenticationServices
 import Combine
 import Foundation

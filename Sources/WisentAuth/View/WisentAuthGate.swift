@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import SwiftUI
 import WisentDesignSystem
@@ -206,3 +207,4 @@ struct WisentOrganizationLoadingView: View {
         .accessibilityIdentifier("wisent.auth.organization-loading")
     }
 }
+#endif

@@ -10,8 +10,10 @@ protocol IdentityPersistence: Sendable {
 
 struct KeychainIdentityStore: IdentityPersistence, @unchecked Sendable {
     static let sharedService = "ai.wisent.identity"
-    static let sharedAccessGroupSuffix = ".ai.wisent.identity"
 
+    /// The signed helper process that owns the shared item on macOS. iOS apps
+    /// cannot start processes; they reach the shared item through the access
+    /// group their Info.plist names (`WisentPermissionCenter.sharedIdentityAccessGroup`).
     private let helper: SharedIdentityKeychainHelper?
     private let service: String
     private let accessGroup: String?
@@ -21,9 +23,13 @@ struct KeychainIdentityStore: IdentityPersistence, @unchecked Sendable {
     private let decoder: JSONDecoder
 
     init(bundleIdentifier: String) {
+        #if os(macOS)
         helper = SharedIdentityKeychainHelper.installed()
+        #else
+        helper = nil
+        #endif
         legacyService = "\(bundleIdentifier).wisent-identity"
-        accessGroup = Self.sharedAccessGroup()
+        accessGroup = WisentPermissionCenter.sharedIdentityAccessGroup()
         service = accessGroup == nil ? legacyService : Self.sharedService
         encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -167,17 +173,5 @@ struct KeychainIdentityStore: IdentityPersistence, @unchecked Sendable {
             item[kSecAttrAccessGroup as String] = accessGroup
         }
         return item
-    }
-
-    private static func sharedAccessGroup() -> String? {
-        guard let task = SecTaskCreateFromSelf(nil),
-              let groups = SecTaskCopyValueForEntitlement(
-                  task,
-                  "keychain-access-groups" as CFString,
-                  nil
-              ) as? [String] else {
-            return nil
-        }
-        return groups.first { $0.hasSuffix(sharedAccessGroupSuffix) }
     }
 }

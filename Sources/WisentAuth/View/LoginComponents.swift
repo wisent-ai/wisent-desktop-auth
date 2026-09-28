@@ -1,3 +1,6 @@
+// The sign-in screens are the macOS apps' screens; the iOS apps drive
+// WisentAuthStore from their own views.
+#if os(macOS)
 import AppKit
 import SwiftUI
 import WisentDesignSystem
@@ -196,3 +199,4 @@ func hubotSemibold(_ size: CGFloat) -> Font {
     _ = WisentTypography.body(size)
     return .custom("HubotSans-SemiBold", size: size)
 }
+#endif

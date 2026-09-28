@@ -1,4 +1,3 @@
-import AppKit
 import AuthenticationServices
 import Combine
 import Foundation
@@ -51,12 +50,14 @@ extension WisentAuthStore {
     }
 
     func broadcastSharedIdentityChange() {
+        #if os(macOS)
         DistributedNotificationCenter.default().postNotificationName(
             Self.sharedIdentityDidChange,
             object: sharedIdentityNotificationSource,
             userInfo: nil,
             deliverImmediately: true
         )
+        #endif
     }
 
 

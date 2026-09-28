@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import SwiftUI
 import WisentDesignSystem
@@ -201,3 +202,4 @@ extension OrganizationManagementView {
         return organization.organizationRole == .owner && !organization.isFixedWisentOrganization
     }
 }
+#endif

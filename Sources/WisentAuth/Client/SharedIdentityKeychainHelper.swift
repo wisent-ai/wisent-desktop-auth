@@ -1,9 +1,12 @@
 import Foundation
 import Security
 
-/// The packaged apps all invoke the same signed helper identity. The login
-/// Keychain therefore sees one designated requirement instead of ten app bundle
-/// identifiers, without requiring a restricted Keychain access-group profile.
+/// The packaged macOS apps all invoke the same signed helper identity. The
+/// login Keychain therefore sees one designated requirement instead of ten app
+/// bundle identifiers, without requiring a restricted Keychain access-group
+/// profile. iOS cannot start a helper process: there the type exists but is
+/// never discovered, and an iOS app reaches the shared item through its
+/// Keychain access group instead.
 struct SharedIdentityKeychainHelper: Sendable {
     static let bundleRelativePath = "Contents/Helpers/WisentIdentityKeychainHelper"
     static let siblingExecutableName = "wisent-identity-keychain-helper"
@@ -17,6 +20,7 @@ struct SharedIdentityKeychainHelper: Sendable {
     }
 
     private let executableURL: URL
+    #if os(macOS)
     static func installed(
         in bundle: Bundle = .main,
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -43,6 +47,7 @@ struct SharedIdentityKeychainHelper: Sendable {
         }
         return Self(executableURL: candidate)
     }
+    #endif
 
     private static func isRunnableExecutable(_ url: URL) -> Bool {
         var isDirectory: ObjCBool = false
@@ -77,6 +82,7 @@ struct SharedIdentityKeychainHelper: Sendable {
     }
 
     private func exchange(action: Action, payload: Data = Data()) throws -> Response {
+        #if os(macOS)
         let process = Process()
         let input = Pipe()
         let output = Pipe()
@@ -101,6 +107,9 @@ struct SharedIdentityKeychainHelper: Sendable {
             throw WisentAuthError.keychain(errSecInternalError)
         }
         return try Response(output.fileHandleForReading.readDataToEndOfFile())
+        #else
+        throw WisentAuthError.keychain(errSecUnimplemented)
+        #endif
     }
 
     private struct Response {

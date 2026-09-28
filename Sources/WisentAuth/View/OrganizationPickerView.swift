@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import SwiftUI
 import WisentDesignSystem
@@ -165,3 +166,4 @@ struct OrganizationInvitationReviewView: View {
         .accessibilityIdentifier("wisent.auth.invitation-review")
     }
 }
+#endif

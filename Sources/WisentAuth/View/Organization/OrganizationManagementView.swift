@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import SwiftUI
 import WisentDesignSystem
@@ -226,3 +227,4 @@ struct OrganizationManagementView: View {
         .accessibilityIdentifier("wisent.auth.organization-management")
     }
 }
+#endif

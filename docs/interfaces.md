@@ -19,6 +19,31 @@ role/removal/ownership management, failure retry, and sign-out.
 Do not copy the access token into app preferences, logs, crash metadata, or UI.
 Use it only for authorized requests to the host product service.
 
+### iOS
+
+The package builds for iOS 17 as well as macOS 14. On iOS it carries
+`WisentAuthStore`, `WisentIdentity`, the Supabase client, the shared-session
+Keychain store and the OAuth web sign-in; the SwiftUI screens
+(`WisentAuthGate` and the sign-in, invitation and organization views) and the
+macOS privacy probes are macOS-only, so an iOS app drives the store from its
+own views. An iOS app must not keep its own Keychain session or run its own
+`ASWebAuthenticationSession`: sign-in, restore and refresh go through the store.
+
+An iOS app and its widgets share one session by naming the shared access group
+they are signed with in Info.plist:
+
+```xml
+<key>WisentIdentityAccessGroup</key>
+<string>$(AppIdentifierPrefix)com.wisent.ios.ai.wisent.identity</string>
+```
+
+The value has to end in `.ai.wisent.identity` and appear in the target's
+`keychain-access-groups` entitlement. Without it the store keeps the session in
+the app's own `<bundle id>.wisent-identity` item, which a widget cannot read.
+`WisentPermissionCenter.report(required: [.sharedIdentityKeychain])` answers
+`notGranted` in that case. There is no cross-app notification on iOS: another
+process's sign-in is seen on the next `start()`.
+
 ### `WisentAuthGate`
 
 ```swift
