@@ -49,6 +49,38 @@ extension WisentAuthStore {
         status = .signedOut
     }
 
+    /// Local sign-out always happens: the user asked to leave, and a server
+    /// that cannot be reached must not keep them signed in. What did not
+    /// happen is shown afterwards, so a session the server still holds, or a
+    /// stored identity the keychain refused to erase (it would come back on the
+    /// next launch), is never presented as a clean sign-out.
+    public func signOut() async {
+        refreshTask?.cancel()
+        refreshTask = nil
+        resetResendCountdown()
+        var remoteFailure: Error?
+        if let token = session?.accessToken {
+            do {
+                try await client.signOut(accessToken: token)
+            } catch {
+                remoteFailure = error
+            }
+        }
+        var storageFailure: Error?
+        do {
+            try persistence.clear()
+        } catch {
+            storageFailure = error
+        }
+        transitionToSignedOut()
+        broadcastSharedIdentityChange()
+        if let storageFailure {
+            report(storageFailure, point: .storage)
+        } else if let remoteFailure {
+            report(remoteFailure, point: .session)
+        }
+    }
+
     func broadcastSharedIdentityChange() {
         guard configuration.sharedIdentity else { return }
         #if os(macOS)

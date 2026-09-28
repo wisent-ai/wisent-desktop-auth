@@ -167,18 +167,6 @@ extension WisentAuthStore {
         await start()
     }
 
-    public func signOut() async {
-        refreshTask?.cancel()
-        refreshTask = nil
-        resetResendCountdown()
-        if let token = session?.accessToken {
-            try? await client.signOut(accessToken: token)
-        }
-        try? persistence.clear()
-        transitionToSignedOut()
-        broadcastSharedIdentityChange()
-    }
-
     @discardableResult
     public func ensureFreshSession() async -> Bool {
         await refreshSessionIfNeeded(requiresOrganization: true)

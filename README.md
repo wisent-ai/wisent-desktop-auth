@@ -138,6 +138,10 @@ OAuth can be disabled with `WISENT_AUTH_OAUTH_ENABLED=0` while retaining email O
   distributed notifications.
 - **Boundary:** an authentication rejection clears the invalid session; transient
   infrastructure failure is classified rather than deliberately erasing it.
+- **Sign-out:** the local session is always cleared; if the server refused to
+  end the session, or the Keychain refused to erase the stored identity (which
+  would restore it on the next launch), the signed-out screen shows that failure
+  instead of presenting a clean sign-out.
 
 ### Manage the organization lifecycle
 
