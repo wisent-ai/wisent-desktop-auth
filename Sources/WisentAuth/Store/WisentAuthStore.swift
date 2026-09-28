@@ -115,6 +115,15 @@ public final class WisentAuthStore: ObservableObject {
             .joined(separator: "-")
     }
 
+    /// A store for a product's own Supabase project
+    /// (`WisentAuthConfiguration.product`): the same sign-in, refresh and
+    /// session Keychain as the shared identity, kept apart from it.
+    public convenience init(productName: String, configuration: WisentAuthConfiguration) {
+        let bundleIdentifier = Bundle.main.bundleIdentifier
+            ?? "ai.wisent.\(WisentAuthStore.identifierSlug(from: productName))"
+        self.init(productName: productName, bundleIdentifier: bundleIdentifier, configuration: configuration)
+    }
+
     init(
         productName: String,
         bundleIdentifier: String,
@@ -125,13 +134,17 @@ public final class WisentAuthStore: ObservableObject {
         self.productName = productName
         self.configuration = configuration
         client = SupabaseIdentityClient(configuration: configuration)
-        self.persistence = persistence ?? KeychainIdentityStore(bundleIdentifier: bundleIdentifier)
+        self.persistence = persistence ?? (configuration.sharedIdentity
+            ? KeychainIdentityStore(bundleIdentifier: bundleIdentifier)
+            : KeychainIdentityStore(productService: "\(bundleIdentifier).session"))
         self.webSessionFactory = webSessionFactory ?? { DesktopWebAuthSession() }
         // Another Wisent app on this Mac that signs in or out posts this, so
         // every app follows the shared identity. iOS has no cross-app
         // notification centre; an iOS app and its widget read the same
-        // access-group item on their next restore instead.
+        // access-group item on their next restore instead. A product's own
+        // project is not that identity and neither follows nor announces it.
         #if os(macOS)
+        guard configuration.sharedIdentity else { return }
         sharedIdentityObserver = DistributedNotificationCenter.default().addObserver(
             forName: Self.sharedIdentityDidChange,
             object: nil,

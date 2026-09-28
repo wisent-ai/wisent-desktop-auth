@@ -7,19 +7,46 @@ public struct WisentAuthConfiguration: Sendable, Equatable {
     public let redirectURL: String
     public let callbackScheme: String
     public let oauthEnabled: Bool
+    /// Whether this is the fleet's shared identity project. A shared identity
+    /// resolves organizations and keeps its session in the one item every
+    /// Wisent app reads; a product's own project (Byk's trading project) has
+    /// no organizations and keeps its session in an item of its own, so it
+    /// never overwrites the identity the other apps are signed in with.
+    public let sharedIdentity: Bool
 
     public init(
         supabaseURL: String,
         anonKey: String,
         redirectURL: String,
         callbackScheme: String,
-        oauthEnabled: Bool
+        oauthEnabled: Bool,
+        sharedIdentity: Bool = true
     ) {
         self.supabaseURL = supabaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         self.anonKey = anonKey.trimmingCharacters(in: .whitespacesAndNewlines)
         self.redirectURL = redirectURL
         self.callbackScheme = callbackScheme
         self.oauthEnabled = oauthEnabled
+        self.sharedIdentity = sharedIdentity
+    }
+
+    /// A product's own Supabase project, signed in through this package's
+    /// store: its email code, OAuth and refresh, returning on the callback
+    /// scheme the product's project already allows, with no organizations and
+    /// a session item of its own.
+    public static func product(
+        supabaseURL: String,
+        anonKey: String,
+        callbackScheme: String
+    ) -> WisentAuthConfiguration {
+        WisentAuthConfiguration(
+            supabaseURL: supabaseURL,
+            anonKey: anonKey,
+            redirectURL: "\(callbackScheme)://auth-callback",
+            callbackScheme: callbackScheme,
+            oauthEnabled: true,
+            sharedIdentity: false
+        )
     }
 
     public static func production(bundleIdentifier: String) -> WisentAuthConfiguration {

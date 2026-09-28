@@ -151,6 +151,21 @@ OAuth can be disabled with `WISENT_AUTH_OAUTH_ENABLED=0` while retaining email O
 - **Boundary:** roles and management permissions drive presentation, but server
   authorization is authoritative; client visibility cannot grant permission.
 
+### Sign in to a product's own project
+
+- **Actor:** a user of a product whose data lives in its own Supabase project
+  (Byk's trading project), not in the shared identity project.
+- **Initial state:** the host creates
+  `WisentAuthStore(productName:configuration: .product(supabaseURL:anonKey:callbackScheme:))`.
+- **Outcome:** the same email code, Apple/Google/GitHub OAuth, restore and
+  refresh as the shared identity, against the product's project and returning
+  on the scheme that project already allows. The store reaches `.ready` on a
+  session alone: no organizations are resolved.
+- **Boundary:** the session is kept in the app's own Keychain item
+  (`<bundle id>.session`), never in the shared `ai.wisent.identity` item, and
+  no macOS identity-change notification is sent or followed, so signing in to
+  the product never changes the identity other Wisent apps use.
+
 ## How it works
 
 ```text

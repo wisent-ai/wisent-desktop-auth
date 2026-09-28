@@ -37,6 +37,19 @@ struct KeychainIdentityStore: IdentityPersistence, @unchecked Sendable {
         decoder.dateDecodingStrategy = .iso8601
     }
 
+    /// A product's own session item, for a project that is not the shared
+    /// identity: no helper, no access group, one per-app service.
+    init(productService: String) {
+        helper = nil
+        legacyService = productService
+        accessGroup = nil
+        service = productService
+        encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+    }
+
     /// Three sources can answer, and until this log existed the caller could
     /// not tell which one did - or tell "nothing is stored" apart from "the
     /// selected helper said not-found while a shared item was sitting right

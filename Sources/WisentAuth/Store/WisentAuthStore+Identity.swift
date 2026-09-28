@@ -50,6 +50,7 @@ extension WisentAuthStore {
     }
 
     func broadcastSharedIdentityChange() {
+        guard configuration.sharedIdentity else { return }
         #if os(macOS)
         DistributedNotificationCenter.default().postNotificationName(
             Self.sharedIdentityDidChange,

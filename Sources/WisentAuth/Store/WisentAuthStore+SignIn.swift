@@ -190,6 +190,8 @@ extension WisentAuthStore {
 
     func refreshSessionIfNeeded(requiresOrganization: Bool) async -> Bool {
         guard let current = session else { return false }
+        // A product's own project has no organization to require.
+        let requiresOrganization = requiresOrganization && configuration.sharedIdentity
         guard current.expiresAt.timeIntervalSinceNow <= Self.refreshLeadTime else {
             return requiresOrganization ? (status == .ready && selectedOrganization != nil) : true
         }

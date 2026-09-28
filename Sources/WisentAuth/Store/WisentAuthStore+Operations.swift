@@ -9,6 +9,13 @@ extension WisentAuthStore {
             status = .signedOut
             return
         }
+        // A product's own project has no organizations: its signed-in session
+        // is the whole context the product needs.
+        guard configuration.sharedIdentity else {
+            clearFailure()
+            status = .ready
+            return
+        }
         status = .resolvingOrganization
         clearFailure()
         do {
