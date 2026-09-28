@@ -27,6 +27,9 @@
           "build"
         ]
       },
+      "tests": [
+        {"name": "identity-store", "argv": ["swift", "test", "--filter", "WisentAuthTests"]}
+      ],
       "stage": {
         "dist/wisent-desktop-auth-source.tar.gz": "source/wisent-desktop-auth-source.tar.gz",
         "dist/SOURCE_REVISION": "SOURCE_REVISION",
