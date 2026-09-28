@@ -74,10 +74,13 @@ extension WisentAuthStore {
         }
         transitionToSignedOut()
         broadcastSharedIdentityChange()
+        // Both reach the operator log; the storage failure is reported last so
+        // it is the one left on screen, because it brings the session back.
+        if let remoteFailure {
+            report(remoteFailure, point: .session)
+        }
         if let storageFailure {
             report(storageFailure, point: .storage)
-        } else if let remoteFailure {
-            report(remoteFailure, point: .session)
         }
     }
 
