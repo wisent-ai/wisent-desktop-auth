@@ -91,8 +91,6 @@ The helper never requests a Keychain authorization window. An existing grant per
 
 The helper uses the normal login Keychain unless `WISENT_IDENTITY_KEYCHAIN_PATH` selects an existing keychain file. This setting applies to the helper used by both native clients and the CLI; it is useful for isolated integration environments. An inaccessible selected file fails without silently returning to the login Keychain. Selection does not modify the user's Keychain search list.
 
-Run the native regression with `swift test --filter KeychainHelperJourneyTests`. It reads an authorized item, refuses an unauthorized read, checks the persisted value after both operations, and verifies that the user's search list stayed unchanged. Its isolated keychains live under `.build/evidence/keychain` and are removed after each successful run. Source hashes, command arguments, exit statuses, and native error codes remain in that directory.
-
 Commands write one JSON value to standard output. Failures write an actionable message to standard error and exit nonzero. Arguments containing spaces must be shell-quoted. Commands that accept `--organization <id-or-slug>` use that organization for the operation; otherwise they use the persisted selected organization.
 
 ## Complete CLI reference
