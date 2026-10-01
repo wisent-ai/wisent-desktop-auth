@@ -4,7 +4,7 @@
   "releases": true,
   "version_source": {
     "kind": "json",
-    "path": "released-surface.json",
+    "path": "version.json",
     "pointer": "/version"
   },
   "platforms": {

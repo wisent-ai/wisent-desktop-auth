@@ -13,5 +13,5 @@ assets/readme-banner.svg
 #   Package.resolved — SwiftPM
 #   Package.swift — SwiftPM
 #   README.md — GitHub shows it on the repository page
-#   released-surface.json — the Wisent release tooling reads it from the root
+#   version.json — the Wisent release tooling reads the released version from it
 .
