@@ -197,10 +197,10 @@ extension WisentAuthStore {
         } catch {
             // A cancelled refresh was superseded - by a newer identity read
             // after another Wisent app broadcast a change, or by the app going
-            // away - and the request that superseded it decides the state. On
-            // 2026-09-18 Jeden reported every such cancellation as "the account
-            // service isn't responding" and showed the sign-in screen once an
-            // hour, with the identity service answering the whole time.
+            // away - and the request that superseded it decides the state. A
+            // store that reports such a cancellation as "the account service
+            // isn't responding" shows the sign-in screen on every refresh
+            // while the identity service answers the whole time.
             if WisentFailureClassifier.isCancellation(error) {
                 return false
             }
