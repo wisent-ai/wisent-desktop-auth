@@ -75,14 +75,9 @@ public final class WisentAuthStore: ObservableObject {
 
     /// Why the app is on the sign-in screen has to survive the app.
     ///
-    /// `errorMessage` is a `@Published` value read by one SwiftUI banner: it
-    /// dies with the view state, it is invisible to the operator and to any
-    /// tooling, and on the one path that ends at a silent `.signedOut` it is
-    /// never set at all. On 2026-08-31 a Jeden Desktop instance was found
-    /// sitting on a first-run welcome screen, having started on 2026-08-27 half
-    /// an hour after the shared session expired, with that session still intact
-    /// in the Keychain and nothing anywhere on the machine saying what the
-    /// restore had decided. The reason was unrecoverable by then.
+    /// View-state errors do not survive process exit, and a restore decision
+    /// can end at `.signedOut` without setting a banner. Keep that decision in
+    /// the persistent diagnostic log as well.
     ///
     /// These lines are `notice`, so they persist, and they name only the
     /// decision: no token, no access token, no refresh token, no email.
