@@ -6,11 +6,17 @@ import WisentAuth
 struct WisentAuthCommand {
     /// `otp verify` takes the action word, the email and the code.
     static let verifyArgumentCount = 3
+    @MainActor static var textOutput = false
 
     @MainActor
     static func main() async {
         do {
-            let arguments = Array(CommandLine.arguments.dropFirst())
+            var arguments = Array(CommandLine.arguments.dropFirst())
+            let text = arguments.contains("--text")
+            let json = arguments.contains("--json")
+            guard !(text && json) else { throw CLIError.usage("--text and --json cannot be combined") }
+            arguments.removeAll { $0 == "--text" || $0 == "--json" }
+            textOutput = text
             guard !arguments.isEmpty else { throw CLIError.usage(Self.usage) }
             if ["help", "--help", "-h"].contains(arguments[0]) {
                 try output(HelpOutput(usage: usage))

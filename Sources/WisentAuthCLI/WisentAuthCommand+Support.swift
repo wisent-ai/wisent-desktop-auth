@@ -1,3 +1,4 @@
+import CoreFoundation
 import Darwin
 import Foundation
 import WisentAuth
@@ -94,17 +95,48 @@ extension WisentAuthCommand {
         guard arguments.isEmpty else { throw CLIError.usage("Unexpected argument '\(arguments[0])'") }
     }
 
+    @MainActor
     static func output<T: Encodable>(_ value: T) throws {
+        if textOutput, let help = value as? HelpOutput {
+            FileHandle.standardOutput.write(Data("\(help.usage)\n".utf8))
+            return
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(value)
-        FileHandle.standardOutput.write(data)
-        FileHandle.standardOutput.write(Data("\n".utf8))
+        if textOutput {
+            let decoded = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+            let lines = textLines(decoded)
+            FileHandle.standardOutput.write(Data("\(lines.joined(separator: "\n"))\n".utf8))
+        } else {
+            FileHandle.standardOutput.write(data)
+            FileHandle.standardOutput.write(Data("\n".utf8))
+        }
+    }
+
+    private static func textLines(_ value: Any, path: String = "") -> [String] {
+        if let object = value as? [String: Any] {
+            if object.isEmpty { return ["\(path): {}"] }
+            return object.keys.sorted().flatMap { key in
+                textLines(object[key]!, path: path.isEmpty ? key : "\(path).\(key)")
+            }
+        }
+        if let array = value as? [Any] {
+            if array.isEmpty { return ["\(path): []"] }
+            return array.enumerated().flatMap { index, item in textLines(item, path: "\(path)[\(index)]") }
+        }
+        if value is NSNull { return ["\(path): none"] }
+        if let string = value as? String { return ["\(path): \(string.replacingOccurrences(of: "\n", with: "\\n"))"] }
+        if let number = value as? NSNumber {
+            let rendered = CFGetTypeID(number) == CFBooleanGetTypeID() ? (number.boolValue ? "true" : "false") : number.stringValue
+            return ["\(path): \(rendered)"]
+        }
+        return ["\(path): \(value)"]
     }
 
     static let usage = """
-    Usage: wisent-auth <command>
+    Usage: wisent-auth [--json|--text] <command>
 
       otp request <email>
       otp verify <email> <six-digit-code>

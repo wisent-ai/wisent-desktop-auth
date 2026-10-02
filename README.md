@@ -209,14 +209,17 @@ initializers are described in [docs/interfaces.md](docs/interfaces.md).
 
 ## CLI
 
-`wisent-auth help` prints the command list as JSON without opening the saved
+`wisent-auth help` prints the command list without opening the saved
 session. `wisent-auth status`, `otp request <email>`,
 `otp verify <email> <six-digit-code>`, and the `organization`, `invitation`,
 `member` and `ownership` groups use the same `WisentAuthStore` as the SwiftUI
-gate. Results are JSON. An unknown command, an unexpected argument or a
-missing `--organization` value exits 2 and names the invalid input; an
-authentication, network or store failure exits 1. `wisent-auth help` is a
-read-only way to inspect the available operations without unlocking Keychain.
+gate. Results are JSON by default. `wisent-auth --text status` prints the same
+fields as `key: value` lines (including nested keys); `--json` selects the
+default explicitly. `--text` and `--json` together exit 2. An unknown command,
+an unexpected argument or a missing `--organization` value also exits 2 and
+names the invalid input; an authentication, network or store failure exits 1.
+`wisent-auth help` is a read-only way to inspect the available operations
+without unlocking Keychain.
 
 ## Failure semantics
 
