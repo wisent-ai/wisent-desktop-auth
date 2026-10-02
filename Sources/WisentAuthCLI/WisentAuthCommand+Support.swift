@@ -82,7 +82,7 @@ extension WisentAuthCommand {
 
     static func takeOption(_ name: String, from arguments: inout [String]) throws -> String? {
         guard let index = arguments.firstIndex(of: name) else { return nil }
-        guard arguments.indices.contains(index + 1) else {
+        guard arguments.indices.contains(index + 1), !arguments[index + 1].hasPrefix("--") else {
             throw CLIError.usage("\(name) requires a value")
         }
         let value = arguments[index + 1]

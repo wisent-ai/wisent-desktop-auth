@@ -207,6 +207,17 @@ Prerequisites, package setup and the first sign in are described in
 The auth store, the auth gate, the environment identity and the configuration
 initializers are described in [docs/interfaces.md](docs/interfaces.md).
 
+## CLI
+
+`wisent-auth help` prints the command list as JSON without opening the saved
+session. `wisent-auth status`, `otp request <email>`,
+`otp verify <email> <six-digit-code>`, and the `organization`, `invitation`,
+`member` and `ownership` groups use the same `WisentAuthStore` as the SwiftUI
+gate. Results are JSON. An unknown command, an unexpected argument or a
+missing `--organization` value exits 2 and names the invalid input; an
+authentication, network or store failure exits 1. `wisent-auth help` is a
+read-only way to inspect the available operations without unlocking Keychain.
+
 ## Failure semantics
 
 The library classifies failures by stable code, service, impact, retryability and a user-safe message.

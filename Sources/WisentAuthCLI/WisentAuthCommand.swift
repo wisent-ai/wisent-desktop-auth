@@ -12,12 +12,22 @@ struct WisentAuthCommand {
         do {
             let arguments = Array(CommandLine.arguments.dropFirst())
             guard !arguments.isEmpty else { throw CLIError.usage(Self.usage) }
+            if ["help", "--help", "-h"].contains(arguments[0]) {
+                try output(HelpOutput(usage: usage))
+                return
+            }
             let store = WisentAuthStore(productName: "Wisent Auth CLI")
             await store.start()
             try await run(arguments, store: store)
         } catch {
             let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             FileHandle.standardError.write(Data("wisent-auth: \(message)\n".utf8))
+            if let cliError = error as? CLIError {
+                switch cliError {
+                case .usage: exit(2)
+                case .failure: break
+                }
+            }
             exit(EXIT_FAILURE)
         }
     }
