@@ -15,9 +15,6 @@ private enum HTTPStatus {
 enum WisentFailureClassifier {
 
     private static let logger = Logger(subsystem: "ai.wisent.desktop.auth", category: "failure")
-    /// The operator log keeps this much of a raw diagnostic; the rest is noise for a reader.
-    private static let maxDiagnosticLength = 400
-
     /// URLError codes that mean this Mac cannot reach anything. Everything else
     /// that fails at the transport layer is treated as our problem, because
     /// from the user's seat it is.
@@ -163,10 +160,9 @@ enum WisentFailureClassifier {
         )
     }
 
-    /// Collapses the detail onto one line, strips the one thing that must not be
-    /// persisted even for an operator — bearer material — and cuts it to this
-    /// product's own width. The width stays here; how to cut is the catalogue's
-    /// hard cut, which is what the rest of the fleet emits.
+    /// Collapses the detail onto one line and strips the one thing that must
+    /// not be persisted even for an operator — bearer material. The rest stays
+    /// whole, because the cut part is where the cause usually is.
     private static func sanitize(_ detail: String) -> String {
         let singleLine = detail.split(whereSeparator: \.isNewline).joined(separator: " ")
         let redacted = Self.secretPattern.stringByReplacingMatches(
@@ -174,7 +170,7 @@ enum WisentFailureClassifier {
             range: NSRange(singleLine.startIndex..., in: singleLine),
             withTemplate: "$1<redacted>"
         )
-        return trimDetail(redacted, limit: maxDiagnosticLength)
+        return redacted.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static let secretPattern: NSRegularExpression = {
