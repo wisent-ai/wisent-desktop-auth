@@ -31,7 +31,6 @@ extension WisentAuthStore {
     func transitionToSignedOut() {
         refreshTask?.cancel()
         refreshTask = nil
-        resetResendCountdown()
         session = nil
         restoredIdentity = nil
         restoredIdentityPending = false
@@ -57,7 +56,6 @@ extension WisentAuthStore {
     public func signOut() async {
         refreshTask?.cancel()
         refreshTask = nil
-        resetResendCountdown()
         var remoteFailure: Error?
         if let token = session?.accessToken {
             do {

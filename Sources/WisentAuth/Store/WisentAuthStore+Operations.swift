@@ -152,33 +152,6 @@ extension WisentAuthStore {
         }
     }
 
-    func startResendCountdown() {
-        resendCountdownTask?.cancel()
-        resendCountdown = Self.resendDuration
-        resendCountdownTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(for: .seconds(1))
-                } catch {
-                    return
-                }
-                guard let self, !Task.isCancelled else { return }
-                guard self.resendCountdown > 0 else { return }
-                self.resendCountdown -= 1
-                if self.resendCountdown == 0 {
-                    self.resendCountdownTask = nil
-                    return
-                }
-            }
-        }
-    }
-
-    func resetResendCountdown() {
-        resendCountdownTask?.cancel()
-        resendCountdownTask = nil
-        resendCountdown = 0
-    }
-
     func scheduleRefresh(for session: WisentSession) {
         refreshTask?.cancel()
         let delayMilliseconds = max(

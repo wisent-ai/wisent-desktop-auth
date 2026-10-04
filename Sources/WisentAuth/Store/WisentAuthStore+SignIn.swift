@@ -95,7 +95,6 @@ extension WisentAuthStore {
             email = address
             code = ""
             status = .waitingForCode
-            startResendCountdown()
         }
     }
 
@@ -118,12 +117,13 @@ extension WisentAuthStore {
         }
     }
 
+    /// The identity service decides how often a code may be sent; a refusal it
+    /// answers with is shown as its own message, not pre-empted by a timer here.
     public func resendCode() async {
-        guard resendCountdown == 0, !isBusy else { return }
+        guard !isBusy else { return }
         await perform(point: .otpRequest) {
             try await client.requestOTP(email: email)
             code = ""
-            startResendCountdown()
         }
     }
 
@@ -140,7 +140,6 @@ extension WisentAuthStore {
     }
 
     public func changeEmail() {
-        resetResendCountdown()
         code = ""
         clearFailure()
         status = .signedOut
@@ -260,7 +259,6 @@ extension WisentAuthStore {
     func accept(_ newSession: WisentSession) async throws {
         restoredIdentity = nil
         restoredIdentityPending = false
-        resetResendCountdown()
         session = newSession
         email = newSession.email
         code = ""

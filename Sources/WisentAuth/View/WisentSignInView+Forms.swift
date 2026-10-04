@@ -141,18 +141,6 @@ extension WisentSignInView {
             .keyboardShortcut(.return)
 
             HStack(spacing: 8) {
-                if store.resendCountdown > 0 {
-                    Text("\(store.resendCountdown)s")
-                        .font(WisentTypography.bodyMedium(14))
-                        .foregroundStyle(.white)
-                        .frame(height: 20)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(LoginPalette.label)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .shadow(color: LoginPalette.inputShadow, radius: 1, x: 0, y: 1)
-                }
-
                 Button("Resend Code") {
                     digits = Array(repeating: "", count: 6)
                     store.code = ""
@@ -162,13 +150,9 @@ extension WisentSignInView {
                 }
                 .buttonStyle(.plain)
                 .font(WisentTypography.bodyMedium(14))
-                .foregroundStyle(
-                    store.resendCountdown > 0
-                        ? LoginPalette.placeholder
-                        : LoginPalette.link
-                )
+                .foregroundStyle(store.isBusy ? LoginPalette.placeholder : LoginPalette.link)
                 .frame(height: 20)
-                .disabled(store.resendCountdown > 0)
+                .disabled(store.isBusy)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 4)

@@ -144,7 +144,6 @@ extension SupabaseIdentityClient {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        request.timeoutInterval = 30
         request.setValue(configuration.anonKey, forHTTPHeaderField: "apikey")
         request.setValue(
             "Bearer \(accessToken)",

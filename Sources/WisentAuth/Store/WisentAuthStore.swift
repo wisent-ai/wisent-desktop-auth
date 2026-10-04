@@ -25,17 +25,11 @@ public final class WisentAuthStore: ObservableObject {
     @Published public internal(set) var organizations: [WisentOrganization] = []
     @Published public internal(set) var restoredIdentity: WisentRestoredIdentity?
     @Published public internal(set) var selectedOrganization: WisentOrganization?
-    @Published public var email = "" {
-        didSet {
-            guard email != oldValue else { return }
-            resetResendCountdown()
-        }
-    }
+    @Published public var email = ""
     @Published public var code = ""
     @Published public internal(set) var isBusy = false
     @Published public internal(set) var isOAuthBusy = false
     @Published public internal(set) var loadingProvider: String?
-    @Published public internal(set) var resendCountdown: Int = 0
     @Published public internal(set) var errorMessage: String?
 
     /// The classified form of ``errorMessage``. Lets a host app tell the user's
@@ -62,7 +56,6 @@ public final class WisentAuthStore: ObservableObject {
     var started = false
     var restoredIdentityPending = false
     var refreshTask: Task<Void, Never>?
-    var resendCountdownTask: Task<Void, Never>?
     var webSession: (any OAuthWebSession)?
     let webSessionFactory: @MainActor () -> any OAuthWebSession
     var sharedIdentityObserver: NSObjectProtocol?
@@ -71,7 +64,6 @@ public final class WisentAuthStore: ObservableObject {
         "ai.wisent.identity.didChange"
     )
     static let refreshLeadTime: TimeInterval = 5 * 60
-    static let resendDuration = 60
 
     /// Why the app is on the sign-in screen has to survive the app.
     ///
@@ -158,7 +150,6 @@ public final class WisentAuthStore: ObservableObject {
 
     deinit {
         refreshTask?.cancel()
-        resendCountdownTask?.cancel()
         #if os(macOS)
         if let sharedIdentityObserver {
             DistributedNotificationCenter.default().removeObserver(sharedIdentityObserver)
