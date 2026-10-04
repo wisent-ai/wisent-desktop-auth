@@ -90,18 +90,19 @@ manufacture an anonymous/product fallback.
 
 ### Configuration
 
-The public convenience initializer uses:
+The public convenience initializer reads the host app's own declaration:
 
-| Variable | Meaning | Default behavior |
+| Input | Meaning | When absent |
 |---|---|---|
-| `SUPABASE_URL` | identity API base | Wisent production project URL |
-| `SUPABASE_ANON_KEY` | public Supabase client key | Wisent production anon key |
+| Info.plist `WisentIdentityURL`, else `SUPABASE_URL` | identity API base | not configured: sign-in reports `identity url is missing or not a url: declare WisentIdentityURL in the app's Info.plist or SUPABASE_URL` |
+| Info.plist `WisentIdentityAnonKey`, else `SUPABASE_ANON_KEY` | public Supabase client key | not configured: sign-in reports `anon key is empty: declare WisentIdentityAnonKey …` |
 | `WISENT_AUTH_CALLBACK_SCHEME` | app URL callback scheme | host bundle identifier |
 | `WISENT_AUTH_REDIRECT_URL` | OAuth redirect URL | `<scheme>://auth-callback` |
 | `WISENT_AUTH_OAUTH_ENABLED` | OAuth presentation | enabled unless exactly `0` |
 
-The canonical production identity URL is
-`https://alvaewvbyxpgwdpugnxy.supabase.co`.
+This package compiles in no identity project. Each app declares it in its
+Info.plist (macOS apps in their checked-in `Info.plist`, iOS apps through
+`project.yml`); a CLI or test host with no bundle sets the environment.
 
 The Supabase anon key identifies the public client; it is not a service-role
 secret. Never put a service-role key into this client package or host app.

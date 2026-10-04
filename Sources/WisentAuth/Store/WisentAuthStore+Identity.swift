@@ -150,9 +150,9 @@ extension WisentAuthStore {
     /// Which half of the configuration is unusable. Names the field, never its
     /// value, and only ever reaches the log.
     var configurationReason: String {
-        URL(string: configuration.supabaseURL) == nil
-            ? "identity url is missing or not a url"
-            : "anon key is empty"
+        configuration.supabaseURL.isEmpty || URL(string: configuration.supabaseURL) == nil
+            ? "identity url is missing or not a url: declare WisentIdentityURL in the app's Info.plist or SUPABASE_URL"
+            : "anon key is empty: declare WisentIdentityAnonKey in the app's Info.plist or SUPABASE_ANON_KEY"
     }
 
     func publishRestoredIdentityIfReady() {

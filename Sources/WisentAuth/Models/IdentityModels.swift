@@ -49,12 +49,23 @@ public struct WisentAuthConfiguration: Sendable, Equatable {
         )
     }
 
+    /// The app's own Wisent Identity configuration: the `WisentIdentityURL`
+    /// and `WisentIdentityAnonKey` keys of its Info.plist, else
+    /// `SUPABASE_URL` / `SUPABASE_ANON_KEY` from the environment (a CLI or a
+    /// test host has no bundle). Nothing is compiled into this package: an
+    /// app that declares neither is not configured, and sign-in says so.
     public static func production(bundleIdentifier: String) -> WisentAuthConfiguration {
         let environment = ProcessInfo.processInfo.environment
         let callbackScheme = environment["WISENT_AUTH_CALLBACK_SCHEME"] ?? bundleIdentifier
+        func declared(_ infoKey: String, _ environmentKey: String) -> String {
+            let bundled = (Bundle.main.object(forInfoDictionaryKey: infoKey) as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !bundled.isEmpty, !bundled.hasPrefix("$(") { return bundled }
+            return environment[environmentKey]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
         return WisentAuthConfiguration(
-            supabaseURL: environment["SUPABASE_URL"] ?? "https://alvaewvbyxpgwdpugnxy.supabase.co",
-            anonKey: environment["SUPABASE_ANON_KEY"] ?? "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFsdmFld3ZieXhwZ3dkcHVnbnh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzOTc5NDcsImV4cCI6MjA5Njk3Mzk0N30.xkkJ36ZTwtqyVZLFju0vc9S25grTuKbj9ILKlsXdUPA",
+            supabaseURL: declared("WisentIdentityURL", "SUPABASE_URL"),
+            anonKey: declared("WisentIdentityAnonKey", "SUPABASE_ANON_KEY"),
             redirectURL: environment["WISENT_AUTH_REDIRECT_URL"] ?? "\(callbackScheme)://auth-callback",
             callbackScheme: callbackScheme,
             oauthEnabled: environment["WISENT_AUTH_OAUTH_ENABLED"] != "0"
@@ -62,7 +73,7 @@ public struct WisentAuthConfiguration: Sendable, Equatable {
     }
 
     public var isConfigured: Bool {
-        URL(string: supabaseURL) != nil && !anonKey.isEmpty
+        !supabaseURL.isEmpty && URL(string: supabaseURL) != nil && !anonKey.isEmpty
     }
 }
 
