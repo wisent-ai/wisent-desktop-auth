@@ -65,8 +65,17 @@ extension WisentAuthStore {
             // service blinked would force a pointless re-login and make an
             // outage indistinguishable from an expired account.
             let restore = report(error, point: .session)
+            // A rejected identity that cannot be cleared stays in the keychain
+            // and is restored - and rejected - on every launch; that failure is
+            // recorded and logged instead of passing as "cleared".
+            var cleared = false
             if restore.code == .auth {
-                try? persistence.clear()
+                do {
+                    try persistence.clear()
+                    cleared = true
+                } catch {
+                    report(error, point: .storage)
+                }
                 session = nil
                 restoredIdentityPending = false
             }
@@ -74,7 +83,7 @@ extension WisentAuthStore {
                 """
                 \(self.productName, privacy: .public): restore failed as \
                 \(String(describing: restore.code), privacy: .public); stored identity \
-                \(restore.code == .auth ? "cleared" : "kept", privacy: .public); showing sign-in
+                \(cleared ? "cleared" : (restore.code == .auth ? "could not be cleared" : "kept"), privacy: .public); showing sign-in
                 """
             )
             status = .signedOut

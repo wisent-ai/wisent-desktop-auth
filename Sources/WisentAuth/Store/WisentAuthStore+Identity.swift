@@ -167,8 +167,14 @@ extension WisentAuthStore {
         )
     }
 
-    /// True when there is a session on disk worth restoring again.
+    /// True when there is a session on disk worth restoring again. A keychain
+    /// that cannot be read counts, so the sign-in screen's retry restores
+    /// again and the restore reports why the read failed.
     var hasStoredSession: Bool {
-        ((try? persistence.load()) ?? nil) != nil
+        do {
+            return try persistence.load() != nil
+        } catch {
+            return true
+        }
     }
 }
