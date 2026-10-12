@@ -17,7 +17,8 @@
             "bash",
             "release/build.sh",
             "compile"
-          ]
+          ],
+          "kind": "lint"
         }
       ],
       "build": {
