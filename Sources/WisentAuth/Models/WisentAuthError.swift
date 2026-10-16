@@ -16,7 +16,6 @@ enum WisentAuthError: LocalizedError {
     case malformedSession
     case noOrganization
     case keychain(OSStatus)
-    case webAuthenticationTimedOut
     case oauthRejected(String)
     case organizationRefusal(WisentOrganizationRefusal)
     case invitationSavedButUndelivered(WisentOrganizationInvite)
@@ -29,7 +28,6 @@ enum WisentAuthError: LocalizedError {
         case .malformedSession: .session
         case .noOrganization, .organizationRefusal, .invitationSavedButUndelivered: .organizations
         case .keychain: .storage
-        case .webAuthenticationTimedOut: .oauthAuthorize
         case .oauthRejected: .oauthCallback
         }
     }
@@ -58,8 +56,6 @@ enum WisentAuthError: LocalizedError {
             .infraDown
         case .keychain:
             .unknown
-        case .webAuthenticationTimedOut:
-            .timeout
         case .oauthRejected:
             .auth
         }
@@ -77,8 +73,6 @@ enum WisentAuthError: LocalizedError {
             "Invitation was saved, but its email was not delivered. Retry it below."
         case .keychain:
             "Your sign-in couldn't be stored securely on this Mac. Try again, and check your keychain if it keeps failing."
-        case .webAuthenticationTimedOut:
-            "Browser sign-in did not respond. Cancel it or try again."
         default:
             nil
         }
@@ -94,7 +88,11 @@ enum WisentAuthError: LocalizedError {
         case let .invalidResponse(point):
             "non-http response at \(point.id)"
         case let .http(response, _):
-            "http \(response.status) header=\(response.headerCode ?? "-") body=\(response.body)"
+            if let headerCode = response.headerCode {
+                "http \(response.status) header=\(headerCode) body=\(response.body)"
+            } else {
+                "http \(response.status) without an error-code header body=\(response.body)"
+            }
         case .malformedSession:
             "session payload missing access_token, refresh_token or user id"
         case .noOrganization:
@@ -105,8 +103,6 @@ enum WisentAuthError: LocalizedError {
             "invitation \(invitation.id) persisted with delivery status \(invitation.deliveryStatus.rawValue)"
         case let .keychain(status):
             "keychain osstatus \(status)"
-        case .webAuthenticationTimedOut:
-            "asWebAuthenticationSession produced no callback before its deadline"
         case let .oauthRejected(detail):
             "oauth callback carried no authorization code: \(detail)"
         }

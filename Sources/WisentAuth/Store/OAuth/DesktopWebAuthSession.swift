@@ -16,14 +16,8 @@ protocol OAuthWebSession: AnyObject {
 final class DesktopWebAuthSession: NSObject, OAuthWebSession,
     ASWebAuthenticationPresentationContextProviding
 {
-    private let timeout: Duration
     private var session: ASWebAuthenticationSession?
     private var continuation: CheckedContinuation<URL, Error>?
-    private var timeoutTask: Task<Void, Never>?
-
-    init(timeout: Duration = .seconds(300)) {
-        self.timeout = timeout
-    }
 
     func start(url: URL, callbackScheme: String) async throws -> URL {
         guard continuation == nil else { throw WisentAuthError.invalidResponse(.oauthAuthorize) }
@@ -51,14 +45,9 @@ final class DesktopWebAuthSession: NSObject, OAuthWebSession,
                     finish(.failure(WisentAuthError.invalidResponse(.oauthAuthorize)))
                     return
                 }
-                timeoutTask = Task { @MainActor [weak self, timeout] in
-                    do {
-                        try await Task.sleep(for: timeout)
-                    } catch {
-                        return
-                    }
-                    self?.cancel(with: WisentAuthError.webAuthenticationTimedOut)
-                }
+                // The sign-in ends when the person completes it, cancels the
+                // browser sheet, or the caller's task is cancelled; nothing
+                // decides on their behalf how long reading a login page may take.
             }
         } onCancel: {
             Task { @MainActor [weak self] in
@@ -68,20 +57,14 @@ final class DesktopWebAuthSession: NSObject, OAuthWebSession,
     }
 
     func cancel() {
-        cancel(with: CancellationError())
-    }
-
-    private func cancel(with error: Error) {
         guard continuation != nil else { return }
         session?.cancel()
-        finish(.failure(error))
+        finish(.failure(CancellationError()))
     }
 
     private func finish(_ result: Result<URL, Error>) {
         guard let continuation else { return }
         self.continuation = nil
-        timeoutTask?.cancel()
-        timeoutTask = nil
         session = nil
         continuation.resume(with: result)
     }

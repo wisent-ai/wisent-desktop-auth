@@ -224,7 +224,7 @@ without unlocking Keychain.
 ## Failure semantics
 
 The library classifies failures by stable code, service, impact, retryability and a user-safe message.
-It distinguishes authentication rejection from rate limiting, network, timeout, upstream identity, storage, invalid response, configuration, cancellation and unknown failures.
+It distinguishes authentication rejection from rate limiting, network, an upstream that did not answer in time, upstream identity, storage, invalid response, configuration, cancellation and unknown failures.
 An explicit `x-wisent-failure: refused` remains a policy refusal in CLI and GUI output: it is not retryable, not an outage and not evidence that a session expired.
 HTTP status fallback keeps the catalogue's existing classification rules.
 
@@ -248,8 +248,9 @@ the classified failure rather than parsing text in `errorMessage`.
 - Session replacement, organization switching and sign-out are propagated
   between running Wisent apps with a system distributed notification. The
   notification contains no token or other secret; recipients re-read Keychain.
-- OAuth uses `ASWebAuthenticationSession`, a five-minute client timeout, and PKCE
-  S256. Callback scheme/provider registration must exactly match the host.
+- OAuth uses `ASWebAuthenticationSession` and PKCE S256. A sign-in lasts until
+  the person completes it, cancels the browser sheet, or the calling task is
+  cancelled. Callback scheme/provider registration must exactly match the host.
 - Email addresses, user IDs, organization metadata, invitations, membership,
   roles, access tokens, and refresh tokens are sensitive identity data.
 - Do not log tokens, upstream response bodies, invitation tokens, or full request
