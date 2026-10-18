@@ -41,13 +41,15 @@ struct MembershipRow: Decodable, Sendable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         organizationID = try values.decode(String.self, forKey: .organizationID)
         role = try values.decode(WisentOrganizationRole.self, forKey: .role)
-        let decodedPermissions = try values.decodeIfPresent(
+        // organization_members.management_permissions is NOT NULL, so a row
+        // without it is not a row this query returns, and it is refused.
+        let storedPermissions = try values.decode(
             [WisentOrganizationManagementPermission].self,
             forKey: .managementPermissions
         )
         managementPermissions = role == .owner
             ? WisentOrganizationManagementPermission.allCases
-            : decodedPermissions ?? []
+            : storedPermissions
         organization = try values.decode(Organization.self, forKey: .organization)
     }
 
