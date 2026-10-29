@@ -3,7 +3,7 @@ name: Version check
 # Refuse a change whose next version would disagree with what the change did
 # to this package's public API.
 #
-# Stado owns the whole check: `stado product surface` builds the library at
+# Stado owns the whole check: `stado product swift api` builds the library at
 # the tag consumers resolve and at this revision, reads both public surfaces
 # with the toolchain's own `swift api-digester`, and refuses when the version
 # this revision declares does not match the change the digester names. This
@@ -45,4 +45,4 @@ jobs:
         run: git fetch --force --tags --unshallow || git fetch --force --tags
 
       - name: Compare the public API against the released tag
-        run: stado product surface --package-path . --json
+        run: stado product swift api --package-path . --json
