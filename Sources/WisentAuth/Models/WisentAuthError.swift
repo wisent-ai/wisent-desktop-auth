@@ -16,6 +16,10 @@ enum WisentAuthError: LocalizedError {
     case malformedSession
     case noOrganization
     case keychain(OSStatus)
+    /// The shared Keychain helper could not be started, could not be handed
+    /// its request, exited unsuccessfully or answered with too few bytes; the
+    /// payload names the helper, the step and the cause.
+    case keychainHelper(String)
     case oauthRejected(String)
     case organizationRefusal(WisentOrganizationRefusal)
     case invitationSavedButUndelivered(WisentOrganizationInvite)
@@ -27,7 +31,7 @@ enum WisentAuthError: LocalizedError {
         case let .http(_, point): point
         case .malformedSession: .session
         case .noOrganization, .organizationRefusal, .invitationSavedButUndelivered: .organizations
-        case .keychain: .storage
+        case .keychain, .keychainHelper: .storage
         case .oauthRejected: .oauthCallback
         }
     }
@@ -54,7 +58,7 @@ enum WisentAuthError: LocalizedError {
             // is not a session. That is our side being broken, and it must
             // never surface as "no such account".
             .infraDown
-        case .keychain:
+        case .keychain, .keychainHelper:
             .unknown
         case .oauthRejected:
             .auth
@@ -71,7 +75,7 @@ enum WisentAuthError: LocalizedError {
             refusal.userMessage
         case .invitationSavedButUndelivered:
             "Invitation was saved, but its email was not delivered. Retry it below."
-        case .keychain:
+        case .keychain, .keychainHelper:
             "Your sign-in couldn't be stored securely on this Mac. Try again, and check your keychain if it keeps failing."
         default:
             nil
@@ -103,6 +107,8 @@ enum WisentAuthError: LocalizedError {
             "invitation \(invitation.id) persisted with delivery status \(invitation.deliveryStatus.rawValue)"
         case let .keychain(status):
             "keychain osstatus \(status)"
+        case let .keychainHelper(detail):
+            "keychain helper: \(detail)"
         case let .oauthRejected(detail):
             "oauth callback carried no authorization code: \(detail)"
         }

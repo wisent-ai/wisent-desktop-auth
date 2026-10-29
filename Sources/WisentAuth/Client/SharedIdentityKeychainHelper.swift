@@ -86,27 +86,41 @@ struct SharedIdentityKeychainHelper: Sendable {
         let process = Process()
         let input = Pipe()
         let output = Pipe()
+        let errors = Pipe()
+        let helper = executableURL.path
         process.executableURL = executableURL
         process.standardInput = input
         process.standardOutput = output
-        process.standardError = FileHandle.nullDevice
+        process.standardError = errors
 
         do {
             try process.run()
         } catch {
-            throw WisentAuthError.keychain(errSecInternalError)
+            throw WisentAuthError.keychainHelper("\(helper) did not start: \(error)")
         }
 
+        // A request the helper never received is named with its cause, not
+        // left to read as whatever status the helper answers without it.
         var request = Data([action.rawValue])
         request.append(payload)
-        input.fileHandleForWriting.write(request)
-        try? input.fileHandleForWriting.close()
+        do {
+            try input.fileHandleForWriting.write(contentsOf: request)
+            try input.fileHandleForWriting.close()
+        } catch {
+            process.terminate()
+            process.waitUntilExit()
+            throw WisentAuthError.keychainHelper(
+                "\(helper) was not handed its request: \(error)")
+        }
         process.waitUntilExit()
 
         guard process.terminationStatus == 0 else {
-            throw WisentAuthError.keychain(errSecInternalError)
+            let stderr = String(
+                decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            throw WisentAuthError.keychainHelper(
+                "\(helper) exited with status \(process.terminationStatus): \(stderr)")
         }
-        return try Response(output.fileHandleForReading.readDataToEndOfFile())
+        return try Response(output.fileHandleForReading.readDataToEndOfFile(), helper: helper)
         #else
         throw WisentAuthError.keychain(errSecUnimplemented)
         #endif
@@ -120,9 +134,10 @@ struct SharedIdentityKeychainHelper: Sendable {
         let status: OSStatus
         let payload: Data
 
-        init(_ data: Data) throws {
+        init(_ data: Data, helper: String) throws {
             guard data.count >= Self.statusByteCount else {
-                throw WisentAuthError.keychain(errSecInternalError)
+                throw WisentAuthError.keychainHelper(
+                    "\(helper) answered \(data.count) bytes, fewer than its \(Self.statusByteCount)-byte status")
             }
             let bytes = data.prefix(Self.statusByteCount)
             let bits = bytes.reduce(UInt32.zero) { ($0 << Self.bitsPerByte) | UInt32($1) }
